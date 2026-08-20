@@ -49,8 +49,9 @@ sock.on("end", () => process.exit(0));
  * The flow: bind a fresh MCP socket serving the session's tools, write the
  * stdio-bridge shim into a tempdir, spawn `claude` there with an MCP config
  * pointing at the shim (so claude's tool calls route back through the socket
- * to boop's in-process handlers), capture `--print`'s stdout as the
- * assistant's final turn, then tear down the socket and tempdir.
+ * to boop's in-process handlers), then parse `--output-format stream-json`'s
+ * NDJSON stdout into a full transcript of the agentic loop (assistant turns,
+ * tool calls, tool results), and tear down the socket and tempdir.
  *
  * The plugin depends only on the {@link Plugin} contract, not on any core
  * implementation, so it could be moved to an external package as-is.
@@ -107,7 +108,7 @@ const run = async (
         content: `claude exited ${outcome.code}\n${outcome.stderr}`.trimEnd(),
       });
     } else {
-      entries.push({ role: "assistant", content: outcome.stdout });
+      entries.push(...parseStreamJson(outcome.stdout, claude));
     }
     return { entries };
   } finally {
@@ -115,6 +116,99 @@ const run = async (
     await socket.close();
   }
 };
+
+/**
+ * Parses claude's `--output-format stream-json` stdout (NDJSON) into
+ * transcript entries. Each line is one object:
+ *
+ * - `{"type":"system","subtype":"init",...}` — session init; logged, not
+ *   an entry (boop already records the system prompt and first user turn).
+ * - `{"type":"assistant","message":{...}}` — an assistant turn; content
+ *   blocks map to text plus tool calls.
+ * - `{"type":"user","message":{...}}` — a tool-result turn; each
+ *   `tool_result` block becomes a `tool` entry.
+ * - `{"type":"result",...}` — the final summary; logged (cost/usage). Its
+ *   `result` text is not an entry: it restates the last assistant turn.
+ *
+ * Unparseable lines and unknown types are skipped (logged at debug) so a
+ * format change degrades the transcript rather than crashing the session.
+ */
+function parseStreamJson(stdout: string, claude: Logger): TranscriptEntry[] {
+  const entries: TranscriptEntry[] = [];
+  for (const line of stdout.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    let obj: Record<string, unknown>;
+    try {
+      obj = JSON.parse(trimmed) as Record<string, unknown>;
+    } catch {
+      claude.debug("stream-json: skipping unparseable line", trimmed);
+      continue;
+    }
+    switch (obj.type) {
+      case "system":
+        claude.debug("stream-json: init", trimmed);
+        break;
+      case "assistant": {
+        const message = obj.message as { content?: unknown[] } | undefined;
+        const blocks = Array.isArray(message?.content) ? message.content : [];
+        let text = "";
+        const toolCalls = [];
+        for (const block of blocks as Record<string, unknown>[]) {
+          if (block.type === "text") {
+            text += (block.text as string) ?? "";
+          } else if (block.type === "tool_use") {
+            toolCalls.push({
+              id: String(block.id),
+              name: String(block.name),
+              args: (block.input ?? {}) as Record<string, unknown>,
+            });
+          }
+        }
+        entries.push({
+          role: "assistant",
+          content: text,
+          ...(toolCalls.length > 0 ? { toolCalls } : {}),
+        });
+        break;
+      }
+      case "user": {
+        const message = obj.message as { content?: unknown[] } | undefined;
+        const blocks = Array.isArray(message?.content) ? message.content : [];
+        for (const block of blocks as Record<string, unknown>[]) {
+          if (block.type !== "tool_result") continue;
+          const content = Array.isArray(block.content)
+            ? (block.content as Record<string, unknown>[]).map((b) => ({
+                type: String(b.type ?? "text"),
+                text: typeof b.text === "string" ? b.text : undefined,
+              }))
+            : [{ type: "text", text: String(block.content ?? "") }];
+          entries.push({
+            role: "tool",
+            content: content.map((b) => b.text ?? "").join(""),
+            toolCallId: String(block.tool_use_id ?? ""),
+            result: {
+              content,
+              ...(block.is_error === true ? { isError: true } : {}),
+            },
+          });
+        }
+        break;
+      }
+      case "result":
+        claude.info("result", {
+          subtype: obj.subtype,
+          costUsd: obj.total_cost_usd,
+          durationMs: obj.duration_ms,
+          numTurns: obj.num_turns,
+        });
+        break;
+      default:
+        claude.debug("stream-json: unknown type", trimmed);
+    }
+  }
+  return entries;
+}
 
 interface ClaudeResult {
   readonly stdout: string;
@@ -171,6 +265,13 @@ function runClaude(opts: {
       "",
       "--system-prompt",
       opts.systemPrompt,
+      // Stream the full transcript as NDJSON (one JSON object per line:
+      // init, assistant turns, tool-result user turns, final result) so
+      // boop's transcript reflects the whole agentic loop, not just the
+      // final text. `--verbose` is required with `--print` for stream-json.
+      "--output-format",
+      "stream-json",
+      "--verbose",
       "--print",
       opts.message,
     ];
