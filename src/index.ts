@@ -4,7 +4,7 @@ import { HttpServer } from "./http.js";
 import { mainLoop } from "./main.js";
 import type { EventSink, PluginHost } from "./plugin.js";
 import { consolePlugin } from "./plugins/console.js";
-import { mockPlugin } from "./plugins/mock.js";
+import { httpIngestPlugin } from "./plugins/ingest.js";
 import { EventQueue } from "./queue.js";
 import { ToolRegistry } from "./tools.js";
 
@@ -37,7 +37,7 @@ const pluginHost: PluginHost = {
 
 // Builtin plugins. Each depends only on the Plugin contract, so any of
 // these could be extracted into its own package without changes.
-const builtinPlugins = [mockPlugin, consolePlugin];
+const builtinPlugins = [httpIngestPlugin, consolePlugin];
 for (const plugin of builtinPlugins) {
   await plugin.init(pluginHost);
 }
