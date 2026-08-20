@@ -1,5 +1,5 @@
 {
-  description = "boop - typescript server";
+  description = "boop - persistent event-driven single-user AI agent";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
