@@ -3,6 +3,7 @@ import type { Event } from "./event.js";
 import { ExecutorRegistry } from "./executors.js";
 import { HttpServer } from "./http.js";
 import { mainLoop, type EventExecutor } from "./main.js";
+import { McpUnixServer } from "./mcp/server.js";
 import type { EventSink, PluginHost } from "./plugin.js";
 import { consolePlugin } from "./plugins/console.js";
 import { httpIngestPlugin } from "./plugins/ingest.js";
@@ -18,6 +19,7 @@ const queue = new EventQueue();
 const httpServer = new HttpServer();
 const toolRegistry = new ToolRegistry();
 const executorRegistry = new ExecutorRegistry();
+const mcpServer = new McpUnixServer("boop", "0.1.0");
 
 // Adapter from the internal EventQueue to the plugin-facing EventSink.
 // Plugins never construct Events directly; the core stamps id + timestamp.
@@ -58,7 +60,7 @@ console.log(`http listening on http://${host}:${port}`);
 // and hand it to the registered low-level session executor, then log the
 // returned transcript. Persistence of the transcript is a TODO; for now
 // logging is the record. See {@link SessionRunner}.
-const runner = new SessionRunner(toolRegistry, executorRegistry);
+const runner = new SessionRunner(toolRegistry, executorRegistry, mcpServer);
 const execute: EventExecutor = (event) => runner.run(event);
 
 // Graceful shutdown: closing the queue lets a pending pull reject so the
@@ -75,3 +77,4 @@ process.on("SIGTERM", () => stop("SIGTERM"));
 
 await mainLoop(queue, execute);
 await httpServer.close();
+await mcpServer.close();

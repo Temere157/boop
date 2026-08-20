@@ -1,4 +1,5 @@
 import type { Event } from "./event.js";
+import type { McpServer } from "./plugin.js";
 import type {
   PreparedSession,
   ToolInvocation,
@@ -26,6 +27,7 @@ export class SessionRunner {
   constructor(
     private readonly tools: ToolRegistry,
     private readonly executors: ExecutorRegistry,
+    private readonly mcp: McpServer,
   ) {}
 
   /** Per-event entry point; matches the {@link EventExecutor} signature. */
@@ -51,6 +53,7 @@ export class SessionRunner {
       event,
       systemPrompt: buildSystemPrompt(event),
       tools,
+      mcp: this.mcp,
     };
   }
 

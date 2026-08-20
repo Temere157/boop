@@ -172,17 +172,47 @@ export interface ToolInvocation {
 }
 
 /**
+ * A handle to a per-session MCP server listening on a unix socket. The
+ * executor hands {@link path} to its agent runtime (typically via a small
+ * stdio-bridge shim launched as a command-based MCP server); the agent
+ * connects and calls tools over the MCP stdio protocol. {@link close}
+ * stops serving and unlinks the socket once the session is done.
+ */
+export interface McpSocket {
+  /** Filesystem path of the listening unix socket. */
+  readonly path: string;
+  /** Stop serving and unlink the socket. Idempotent. */
+  close(): Promise<void>;
+}
+
+/**
+ * Serves boop's tools to an agent runtime over the MCP stdio protocol
+ * (newline-delimited JSON-RPC 2.0) on a fresh per-session unix socket. The
+ * executor asks for a socket only if its runtime speaks MCP (e.g.
+ * claude-code in -p mode, reached via a stdio-bridge shim); a session that
+ * calls tools directly need not ask for one.
+ */
+export interface McpServer {
+  serve(tools: ToolInvocation): Promise<McpSocket>;
+}
+
+/**
  * A fully prepared transient session, handed to the low-level executor.
  * The core has already decided which event this session is for, built the
  * system prompt, and gathered the tools available to the agent (with a way
  * to invoke them); the executor only has to run the agentic loop
  * (LLM ↔ tools) and return a transcript. By the time the executor runs, no
  * more preparation is needed — it is the whole "do the work" half.
+ *
+ * {@link mcp} is an opt-in path for executors whose runtime speaks MCP: it
+ * hands out a fresh unix socket serving {@link tools} over the MCP stdio
+ * protocol. An executor that calls tools directly can ignore it.
  */
 export interface PreparedSession {
   readonly event: Event;
   readonly systemPrompt: string;
   readonly tools: ToolInvocation;
+  readonly mcp: McpServer;
 }
 
 /**
