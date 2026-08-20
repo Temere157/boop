@@ -24,6 +24,7 @@ const mcpServer = new McpUnixServer("boop", "0.1.0");
 
 // Adapter from the internal EventQueue to the plugin-facing EventSink.
 // Plugins never construct Events directly; the core stamps id + timestamp.
+const events = log("events");
 const eventSink: EventSink = {
   enqueue(source, payload) {
     const event: Event = {
@@ -32,6 +33,7 @@ const eventSink: EventSink = {
       payload,
       createdAt: Date.now(),
     };
+    events.info("received", { id: event.id, source, payload });
     queue.push(event);
   },
 };
