@@ -5,9 +5,9 @@ import { HttpServer } from "./http.js";
 import { mainLoop, type EventExecutor } from "./main.js";
 import { McpUnixServer } from "./mcp/server.js";
 import type { EventSink, PluginHost } from "./plugin.js";
+import { claudeExecutorPlugin } from "./plugins/claude.js";
 import { consolePlugin } from "./plugins/console.js";
 import { httpIngestPlugin } from "./plugins/ingest.js";
-import { scriptedExecutorPlugin } from "./plugins/scripted.js";
 import { EventQueue } from "./queue.js";
 import { SessionRunner } from "./session.js";
 import { ToolRegistry } from "./tools.js";
@@ -44,11 +44,7 @@ const pluginHost: PluginHost = {
 
 // Builtin plugins. Each depends only on the Plugin contract, so any of
 // these could be extracted into its own package without changes.
-const builtinPlugins = [
-  httpIngestPlugin,
-  consolePlugin,
-  scriptedExecutorPlugin,
-];
+const builtinPlugins = [httpIngestPlugin, consolePlugin, claudeExecutorPlugin];
 for (const plugin of builtinPlugins) {
   await plugin.init(pluginHost);
 }
