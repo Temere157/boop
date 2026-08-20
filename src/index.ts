@@ -3,14 +3,17 @@ import type { Event } from "./event.js";
 import { HttpServer } from "./http.js";
 import { mainLoop } from "./main.js";
 import type { EventSink, PluginHost } from "./plugin.js";
+import { consolePlugin } from "./plugins/console.js";
 import { mockPlugin } from "./plugins/mock.js";
 import { EventQueue } from "./queue.js";
+import { ToolRegistry } from "./tools.js";
 
 const port = Number(process.env.PORT ?? 3000);
 const host = process.env.HOST ?? "0.0.0.0";
 
 const queue = new EventQueue();
 const httpServer = new HttpServer();
+const toolRegistry = new ToolRegistry();
 
 // Adapter from the internal EventQueue to the plugin-facing EventSink.
 // Plugins never construct Events directly; the core stamps id + timestamp.
@@ -26,11 +29,15 @@ const eventSink: EventSink = {
   },
 };
 
-const pluginHost: PluginHost = { events: eventSink, http: httpServer };
+const pluginHost: PluginHost = {
+  events: eventSink,
+  http: httpServer,
+  tools: toolRegistry,
+};
 
 // Builtin plugins. Each depends only on the Plugin contract, so any of
 // these could be extracted into its own package without changes.
-const builtinPlugins = [mockPlugin];
+const builtinPlugins = [mockPlugin, consolePlugin];
 for (const plugin of builtinPlugins) {
   await plugin.init(pluginHost);
 }
