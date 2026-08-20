@@ -84,18 +84,17 @@ const run = async (
     };
     const mcpConfigJson = JSON.stringify(mcpConfig);
     claude.debug("mcp-config", mcpConfigJson);
-    const message = JSON.stringify(session.event.payload, null, 2);
     const outcome = await runClaude({
       cwd: dir,
       mcpConfigJson,
       systemPrompt: session.systemPrompt,
-      message,
+      message: session.firstUserMessage,
       socketPath: socket.path,
       claude,
     });
     const entries: TranscriptEntry[] = [
       { role: "system", content: session.systemPrompt },
-      { role: "user", content: message },
+      { role: "user", content: session.firstUserMessage },
     ];
     if (outcome.error !== undefined) {
       entries.push({

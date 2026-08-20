@@ -15,13 +15,15 @@ const sessionLog = log("session");
 /**
  * The core's per-event handler. This is the bridge between the main loop
  * and a plugin-supplied low-level {@link SessionExecutor}: for each event
- * it prepares a {@link PreparedSession} (event + system prompt + tools with
- * a safe invocation wrapper), hands it to the registered executor, and logs
+ * it prepares a {@link PreparedSession} (event + system prompt + first
+ * user message + tools with a safe invocation wrapper), hands it to the
+ * registered executor, and logs
  * the returned transcript. Persistence of the transcript is a TODO; for now
  * logging is how each event's handling is recorded.
  *
  * Preparation is entirely on the core side so the executor receives
- * something it can run directly: the system prompt is built here, and the
+ * something it can run directly: the system prompt and the first user
+ * message (carrying the event) are built here, and the
  * raw {@link ToolRegistry} is wrapped so a crashing or unknown tool comes
  * back as a semantic {@link ToolResult} (with `isError`) rather than an
  * exception — an executor's agentic loop can keep going on a tool error.
@@ -55,7 +57,8 @@ export class SessionRunner {
     };
     return {
       event,
-      systemPrompt: buildSystemPrompt(event),
+      systemPrompt: buildSystemPrompt(),
+      firstUserMessage: buildFirstUserMessage(event),
       tools,
       mcp: this.mcp,
     };
@@ -114,17 +117,27 @@ export class SessionRunner {
 }
 
 /**
- * Builds the system prompt for a session. The prompt gives the agent its
- * role and the event it is handling; richer context (loaded from memory)
- * will be appended here as memory is built.
+ * Builds the system prompt for a session. The prompt is fixed role text —
+ * the event itself is delivered as the first user message (see
+ * {@link buildFirstUserMessage}); richer context (loaded from memory) will
+ * be appended here as memory is built.
  */
-function buildSystemPrompt(event: Event): string {
+function buildSystemPrompt(): string {
   return [
     "You are boop, a persistent, single-user AI agent. You handle a single",
     "event in a transient session: decide what to do, use the available",
     "tools to act, then finish. Anything worth remembering across sessions",
     "should be written to memory when a memory tool is available.",
-    "",
+  ].join("\n");
+}
+
+/**
+ * Renders the event as the session's first user message, so the event
+ * arrives as a normal user turn rather than being baked into the system
+ * prompt.
+ */
+function buildFirstUserMessage(event: Event): string {
+  return [
     `Event source: ${event.source}`,
     "Event payload:",
     JSON.stringify(event.payload, null, 2),

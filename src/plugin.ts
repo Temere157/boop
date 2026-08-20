@@ -199,10 +199,11 @@ export interface McpServer {
 /**
  * A fully prepared transient session, handed to the low-level executor.
  * The core has already decided which event this session is for, built the
- * system prompt, and gathered the tools available to the agent (with a way
- * to invoke them); the executor only has to run the agentic loop
- * (LLM ↔ tools) and return a transcript. By the time the executor runs, no
- * more preparation is needed — it is the whole "do the work" half.
+ * system prompt and the first user message (which carries the event), and
+ * gathered the tools available to the agent (with a way to invoke them);
+ * the executor only has to run the agentic loop (LLM ↔ tools) and return
+ * a transcript. By the time the executor runs, no more preparation is
+ * needed — it is the whole "do the work" half.
  *
  * {@link mcp} is an opt-in path for executors whose runtime speaks MCP: it
  * hands out a fresh unix socket serving {@link tools} over the MCP stdio
@@ -211,6 +212,12 @@ export interface McpServer {
 export interface PreparedSession {
   readonly event: Event;
   readonly systemPrompt: string;
+  /**
+   * The first user message of the session: the event rendered as a user
+   * turn. The executor passes this to its agent runtime as the prompt,
+   * keeping the event out of the system prompt (which is fixed role text).
+   */
+  readonly firstUserMessage: string;
   readonly tools: ToolInvocation;
   readonly mcp: McpServer;
 }
