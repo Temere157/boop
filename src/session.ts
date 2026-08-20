@@ -136,6 +136,11 @@ function buildSystemPrompt(): string {
     "event in a transient session: decide what to do, use the available",
     "tools to act, then finish. Anything worth remembering across sessions",
     "should be written to memory when a memory tool is available.",
+    "",
+    "Your direct textual output (assistant messages that are not tool",
+    "calls) is only logged; the user will not generally see it. To reach a",
+    "user, use the `respond` tool against an open response channel, and to",
+    "persist anything, write it to memory with the memory tools.",
   ].join("\n");
 }
 
