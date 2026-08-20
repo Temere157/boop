@@ -100,6 +100,9 @@ export class SessionRunner {
       .map((s) => ` ${s}`)
       .join("");
     sessionLog.info(`${tag}${suffix}: ${entry.content}`);
+    if (typeof entry.thinking === "string" && entry.thinking.length > 0) {
+      sessionLog.info(`  thinking: ${entry.thinking}`);
+    }
     if (entry.toolCalls !== undefined) {
       for (const call of entry.toolCalls) {
         sessionLog.info(`  -> ${call.name}(${JSON.stringify(call.args)}) [${call.id}]`);

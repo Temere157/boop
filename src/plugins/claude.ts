@@ -124,7 +124,8 @@ const run = async (
  * - `{"type":"system","subtype":"init",...}` — session init; logged, not
  *   an entry (boop already records the system prompt and first user turn).
  * - `{"type":"assistant","message":{...}}` — an assistant turn; content
- *   blocks map to text plus tool calls.
+ *   blocks map to text, thinking, and tool calls. Turns with none of
+ *   these (models that emit no thinking summary) are skipped.
  * - `{"type":"user","message":{...}}` — a tool-result turn; each
  *   `tool_result` block becomes a `tool` entry.
  * - `{"type":"result",...}` — the final summary; logged (cost/usage). Its
@@ -153,10 +154,13 @@ function parseStreamJson(stdout: string, claude: Logger): TranscriptEntry[] {
         const message = obj.message as { content?: unknown[] } | undefined;
         const blocks = Array.isArray(message?.content) ? message.content : [];
         let text = "";
+        let thinking = "";
         const toolCalls = [];
         for (const block of blocks as Record<string, unknown>[]) {
           if (block.type === "text") {
             text += (block.text as string) ?? "";
+          } else if (block.type === "thinking") {
+            thinking += (block.thinking as string) ?? "";
           } else if (block.type === "tool_use") {
             toolCalls.push({
               id: String(block.id),
@@ -165,9 +169,15 @@ function parseStreamJson(stdout: string, claude: Logger): TranscriptEntry[] {
             });
           }
         }
+        // Some models emit no thinking summary, leaving turns with no
+        // text, thinking, or tool calls — skip those empty entries.
+        if (text.length === 0 && thinking.length === 0 && toolCalls.length === 0) {
+          break;
+        }
         entries.push({
           role: "assistant",
           content: text,
+          ...(thinking.length > 0 ? { thinking } : {}),
           ...(toolCalls.length > 0 ? { toolCalls } : {}),
         });
         break;
