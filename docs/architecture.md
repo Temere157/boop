@@ -69,6 +69,32 @@ API, read a file, send a message. They are the "other tooling" that hangs
 off sessions. Tools are pluggable like providers: a session is given the
 set of tools available to it, and the LLM decides which to use.
 
+### Response channels
+
+Response channels are the reply-side mirror of event providers: where a
+provider pushes an event in, a channel carries a reply out. A provider
+that can deliver a message back to a user — an HTTP ingest request held
+open for a reply, an SMS gateway, a live webui connection — registers a
+`ResponseChannel` for as long as it is willing to deliver and
+unregisters it when it stops. The registry is simply the set of reply
+paths open right now; it has no knowledge of events.
+
+Channel lifetimes are deliberately independent of events. An HTTP ingest
+channel is transient — it lives only while one request is held open — but
+an SMS channel could be eternal (registered at startup, never
+unregistered) and a webui channel is transient on its own clock (the
+life of a connection). A single event may carry a channel id in its
+payload so the session handling it knows where to reply, but the
+registry does not tie a channel's lifetime to any event.
+
+The plugin boundary for replies sits on the channels, not the tool. The
+core owns a single `respond` tool that takes a channel id and a message;
+which channels are available is whatever the providers have opened. The
+session message lists the currently-open channels as a snapshot taken
+when the session is prepared, but the tool queries the registry live at
+call time — so a channel that closed between preparation and a `respond`
+call surfaces as a semantic error to the agent rather than a silent drop.
+
 ## Single-user
 
 Boop assumes one user. There is no multi-tenancy, no per-user isolation,
