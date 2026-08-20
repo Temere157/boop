@@ -146,11 +146,22 @@ function runClaude(opts: {
       resolve(result);
     };
     const args = [
-      "--safe-mode",
+      // Isolate from the user's own claude config without `--safe-mode`,
+      // which disables MCP servers entirely; an empty `--setting-sources`
+      // loads nothing from the user's config dirs while still honoring
+      // `--mcp-config`.
+      "--setting-sources",
+      "",
       "--no-session-persistence",
       "--mcp-config",
       opts.mcpConfigJson,
       "--strict-mcp-config",
+      // Pre-approve every tool from the `boop` MCP server. In `--print`
+      // mode there is no interactive prompt to grant permission, so without
+      // this claude reports the tool as needing approval and never calls
+      // it. MCP tools are named `mcp__<server>__<tool>`.
+      "--allowedTools",
+      "mcp__boop__*",
       "--tools",
       "",
       "--system-prompt",
@@ -161,6 +172,9 @@ function runClaude(opts: {
     console.log(`claude: spawn claude ${args.map((a) => JSON.stringify(a)).join(" ")}`);
     const child = spawn("claude", args, {
       cwd: opts.cwd,
+      // `--print` takes the prompt as an arg, not stdin; ignore stdin so
+      // claude doesn't wait 3s for piped data it will never read.
+      stdio: ["ignore", "pipe", "pipe"],
       env: { ...process.env, BOOP_MCP_SOCKET: opts.socketPath },
     });
     child.stdout.on("data", (chunk: Buffer) => {
