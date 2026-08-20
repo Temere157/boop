@@ -21,6 +21,47 @@ export interface EventSink {
   enqueue(source: string, payload: unknown): void;
 }
 
+/**
+ * A way to send a message back to the originator of an event — the mirror
+ * of {@link EventSink}: where `enqueue` is "event in", a channel is "reply
+ * out". Channels are independent of events: an HTTP ingest channel is
+ * transient (it lives only while a single request is held open), but an
+ * SMS channel could be eternal and a webui channel independently
+ * transient. Whatever owns the channel registers it when it can deliver
+ * and unregisters it when it can't; the core's `respond` tool looks up a
+ * channel by id at call time, so a channel that closed mid-session
+ * surfaces as a semantic error rather than a silent drop.
+ */
+export interface ResponseChannel {
+  /** Stable id, surfaced to the agent via the session message. */
+  readonly id: string;
+  /**
+   * Human-readable note for the agent, e.g. "HTTP reply to POST /ingest,
+   * one-shot, ≤20s" or "SMS to +64…". The agent uses this to pick which
+   * channel to send on.
+   */
+  readonly description?: string;
+  /**
+   * Deliver a message. Rejects if the channel is no longer accepting
+   * replies (provider already responded / timed out / connection closed).
+   * The `respond` tool surfaces that rejection as an `isError` result.
+   */
+  send(message: string): Promise<void>;
+}
+
+/**
+ * Capability to register and unregister response channels. This is the
+ * plugin boundary for replies: a provider that can deliver messages back
+ * to a user (HTTP ingest, SMS, a live webui, …) registers a channel here
+ * for as long as it is willing to deliver, and unregisters it when it
+ * stops. The core owns the one `respond` tool that sends on whatever id
+ * the agent picks — channels are the plugin part, the tool is core.
+ */
+export interface ResponseChannels {
+  register(channel: ResponseChannel): void;
+  unregister(id: string): void;
+}
+
 /** A buffered HTTP request, with the body fully read into memory. */
 export interface HttpRequest {
   readonly method: string;
@@ -273,6 +314,8 @@ export interface PluginHost {
   readonly http: HttpRoutes;
   readonly tools: Tools;
   readonly executors: Executors;
+  /** Register/unregister response channels (the reply-side plugin boundary). */
+  readonly responses: ResponseChannels;
   /** Obtain a scoped, level-filtered logger. */
   readonly log: LogAccess;
 }

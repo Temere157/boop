@@ -1,14 +1,16 @@
 import type { Event } from "./event.js";
 import { log } from "./log.js";
 import { startRecording } from "./record.js";
-import type { McpServer } from "./plugin.js";
 import type {
+  McpServer,
   PreparedSession,
+  ResponseChannel,
   ToolInvocation,
   ToolResult,
   TranscriptEntry,
 } from "./plugin.js";
 import type { ExecutorRegistry } from "./executors.js";
+import type { ResponseChannelRegistry } from "./responses.js";
 import type { ToolRegistry } from "./tools.js";
 
 const sessionLog = log("session");
@@ -33,6 +35,7 @@ export class SessionRunner {
     private readonly tools: ToolRegistry,
     private readonly executors: ExecutorRegistry,
     private readonly mcp: McpServer,
+    private readonly responses: ResponseChannelRegistry,
   ) {}
 
   /** Per-event entry point; matches the {@link EventExecutor} signature. */
@@ -60,7 +63,7 @@ export class SessionRunner {
     return {
       event,
       systemPrompt: buildSystemPrompt(),
-      firstUserMessage: buildFirstUserMessage(event),
+      firstUserMessage: buildFirstUserMessage(event, this.responses.all),
       tools,
       mcp: this.mcp,
     };
@@ -139,12 +142,38 @@ function buildSystemPrompt(): string {
 /**
  * Renders the event as the session's first user message, so the event
  * arrives as a normal user turn rather than being baked into the system
- * prompt.
+ * prompt. The message also enumerates every currently-open response
+ * channel — not just one tied to this event, since channels are
+ * independent of events: an eternal SMS channel is listed in every
+ * session message while a transient webui or HTTP ingest channel appears
+ * only while its owner is holding it open. This is a snapshot taken at
+ * `prepare()` time as a hint; the `respond` tool queries the registry
+ * live, so a channel listed here may already be gone by call time.
  */
-function buildFirstUserMessage(event: Event): string {
-  return [
+function buildFirstUserMessage(
+  event: Event,
+  channels: readonly ResponseChannel[],
+): string {
+  const lines = [
     `Event source: ${event.source}`,
     "Event payload:",
     JSON.stringify(event.payload, null, 2),
-  ].join("\n");
+  ];
+  if (channels.length > 0) {
+    lines.push(
+      "",
+      "Open response channels (send via the `respond` tool; each is open only",
+      "while its owner is willing to deliver, so one may close before you",
+      "send — that returns an error):",
+    );
+    for (const c of channels) {
+      lines.push(`- ${c.id}${c.description ? `: ${c.description}` : ""}`);
+    }
+  } else {
+    lines.push(
+      "",
+      "No response channels are currently open; no originator is awaiting a reply.",
+    );
+  }
+  return lines.join("\n");
 }

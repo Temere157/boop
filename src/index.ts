@@ -6,6 +6,7 @@ import { log } from "./log.js";
 import { mainLoop, type EventExecutor } from "./main.js";
 import { McpUnixServer } from "./mcp/server.js";
 import type { EventSink, PluginHost } from "./plugin.js";
+import { ResponseChannelRegistry, registerRespondTool } from "./responses.js";
 import { claudeExecutorPlugin } from "./plugins/claude.js";
 import { consolePlugin } from "./plugins/console.js";
 import { httpIngestPlugin } from "./plugins/ingest.js";
@@ -21,6 +22,10 @@ const httpServer = new HttpServer();
 const toolRegistry = new ToolRegistry();
 const executorRegistry = new ExecutorRegistry();
 const mcpServer = new McpUnixServer("boop", "0.1.0");
+const responseChannels = new ResponseChannelRegistry();
+// The `respond` tool is core (the plugin boundary is the channels, not the
+// tool), so it is registered here rather than by a plugin.
+registerRespondTool(toolRegistry, responseChannels);
 
 // Adapter from the internal EventQueue to the plugin-facing EventSink.
 // Plugins never construct Events directly; the core stamps id + timestamp.
@@ -43,6 +48,7 @@ const pluginHost: PluginHost = {
   http: httpServer,
   tools: toolRegistry,
   executors: executorRegistry,
+  responses: responseChannels,
   log,
 };
 
@@ -60,7 +66,12 @@ log("http").info("listening", `http://${host}:${port}`);
 // and hand it to the registered low-level session executor, then record
 // the returned transcript as JSONL (in the XDG state dir) and log it.
 // See {@link SessionRunner} and {@link startRecording}.
-const runner = new SessionRunner(toolRegistry, executorRegistry, mcpServer);
+const runner = new SessionRunner(
+  toolRegistry,
+  executorRegistry,
+  mcpServer,
+  responseChannels,
+);
 const execute: EventExecutor = (event) => runner.run(event);
 
 // Graceful shutdown: closing the queue lets a pending pull reject so the
