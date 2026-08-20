@@ -4,6 +4,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import * as readline from "node:readline";
+import { log } from "../log.js";
 import type {
   McpServer,
   McpSocket,
@@ -11,6 +12,8 @@ import type {
   ToolInvocation,
   ToolResult,
 } from "../plugin.js";
+
+const mcp = log("mcp");
 
 /** MCP protocol version this server advertises on `initialize`. */
 const PROTOCOL_VERSION = "2024-11-05";
@@ -31,7 +34,7 @@ class McpUnixSocket implements McpSocket {
   ) {}
 
   close(): Promise<void> {
-    console.log(`mcp: closing socket ${this.path}`);
+    mcp.debug("closing socket", this.path);
     return new Promise((resolve) => {
       this.server.close(() => resolve());
     });
@@ -69,14 +72,14 @@ export class McpUnixServer implements McpServer {
   async serve(tools: ToolInvocation): Promise<McpSocket> {
     const dir = await this.dirPromise;
     const path = join(dir, `${randomUUID()}.sock`);
-    console.log(`mcp: serve binding ${path}`);
+    mcp.debug("binding", path);
     const server = createServer((socket) => this.handle(tools, socket));
     await new Promise<void>((resolve, reject) => {
       const onError = (error: Error): void => reject(error);
       server.on("error", onError);
       server.listen(path, () => {
         server.off("error", onError);
-        console.log(`mcp: serve listening on ${path}`);
+        mcp.info("listening", path);
         resolve();
       });
     });
@@ -98,22 +101,22 @@ export class McpUnixServer implements McpServer {
 
   /** Per-connection JSON-RPC loop. */
   private handle(tools: ToolInvocation, socket: Socket): void {
-    console.log("mcp: connection accepted");
+    mcp.debug("connection accepted");
     socket.on("error", (err: Error) => {
-      console.log(`mcp: socket error: ${err.message}`);
+      mcp.warn("socket error", err.message);
     });
     socket.on("close", () => {
-      console.log("mcp: connection closed");
+      mcp.debug("connection closed");
     });
     const rl = readline.createInterface({ input: socket, crlfDelay: Infinity });
     rl.on("line", (line) => {
-      console.log(`mcp: recv << ${line}`);
+      mcp.trace("recv", line);
       if (line.trim() === "") return;
       let req: JsonRpcRequest;
       try {
         req = JSON.parse(line) as JsonRpcRequest;
       } catch {
-        console.log("mcp: parse error");
+        mcp.warn("parse error", line);
         this.send(socket, {
           jsonrpc: "2.0",
           id: null,
@@ -121,7 +124,7 @@ export class McpUnixServer implements McpServer {
         });
         return;
       }
-      console.log(`mcp: dispatch method=${req.method ?? ""} id=${req.id ?? ""}`);
+      mcp.trace("dispatch", "method=" + (req.method ?? ""), "id=" + (req.id ?? ""));
       void this.handleMessage(tools, req, socket);
     });
   }
@@ -176,7 +179,7 @@ export class McpUnixServer implements McpServer {
 
   private send(socket: Socket, message: unknown): void {
     const line = `${JSON.stringify(message)}\n`;
-    console.log(`mcp: send >> ${line.trimEnd()}`);
+    mcp.trace("send", line.trimEnd());
     socket.write(line);
   }
 

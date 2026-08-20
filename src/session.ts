@@ -1,4 +1,5 @@
 import type { Event } from "./event.js";
+import { log } from "./log.js";
 import type { McpServer } from "./plugin.js";
 import type {
   PreparedSession,
@@ -8,6 +9,8 @@ import type {
 } from "./plugin.js";
 import type { ExecutorRegistry } from "./executors.js";
 import type { ToolRegistry } from "./tools.js";
+
+const sessionLog = log("session");
 
 /**
  * The core's per-event handler. This is the bridge between the main loop
@@ -34,9 +37,10 @@ export class SessionRunner {
   async run(event: Event): Promise<void> {
     const executor = this.executors.get();
     if (executor === undefined) {
-      console.log(
-        `no session executor registered; skipping event ${event.id} (${event.source})`,
-      );
+      sessionLog.warn("no session executor registered; skipping event", {
+        id: event.id,
+        source: event.source,
+      });
       return;
     }
     const session = this.prepare(event);
@@ -80,13 +84,10 @@ export class SessionRunner {
   }
 
   private log(event: Event, transcript: { entries: readonly TranscriptEntry[] }): void {
-    console.log(
-      `--- session transcript ${event.id} source=${event.source} ---`,
-    );
+    sessionLog.info("transcript", { id: event.id, source: event.source });
     for (const entry of transcript.entries) {
       this.logEntry(entry);
     }
-    console.log(`--- end transcript ---`);
   }
 
   private logEntry(entry: TranscriptEntry): void {
@@ -95,17 +96,17 @@ export class SessionRunner {
       .filter((s) => s !== undefined)
       .map((s) => ` ${s}`)
       .join("");
-    console.log(`${tag}${suffix}: ${entry.content}`);
+    sessionLog.info(`${tag}${suffix}: ${entry.content}`);
     if (entry.toolCalls !== undefined) {
       for (const call of entry.toolCalls) {
-        console.log(`  -> ${call.name}(${JSON.stringify(call.args)}) [${call.id}]`);
+        sessionLog.info(`  -> ${call.name}(${JSON.stringify(call.args)}) [${call.id}]`);
       }
     }
     if (entry.result !== undefined) {
       const text = entry.result.content
         .map((b) => b.text ?? "")
         .join("");
-      console.log(
+      sessionLog.info(
         `  result isError=${entry.result.isError ?? false}: ${text}`,
       );
     }

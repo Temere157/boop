@@ -3,6 +3,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type {
+  Logger,
   Plugin,
   PreparedSession,
   SessionExecutor,
@@ -57,18 +58,20 @@ sock.on("end", () => process.exit(0));
 export const claudeExecutorPlugin: Plugin = {
   name: "claude-executor",
   init(host) {
-    host.executors.register(run);
+    const claude = host.log("claude");
+    host.executors.register((session) => run(session, claude));
   },
 };
 
-const run: SessionExecutor = async (
+const run = async (
   session: PreparedSession,
+  claude: Logger,
 ): Promise<SessionTranscript> => {
   const socket = await session.mcp.serve(session.tools);
   const dir = await mkdtemp(join(tmpdir(), "boop-claude-"));
   const shimPath = join(dir, "mcp-shim.mjs");
   await writeFile(shimPath, SHIM, { mode: 0o755 });
-  console.log(`claude: socket=${socket.path} shim=${shimPath} cwd=${dir}`);
+  claude.info("session", { socket: socket.path, shim: shimPath, cwd: dir });
   try {
     const mcpConfig = {
       mcpServers: {
@@ -80,7 +83,7 @@ const run: SessionExecutor = async (
       },
     };
     const mcpConfigJson = JSON.stringify(mcpConfig);
-    console.log(`claude: mcp-config=${mcpConfigJson}`);
+    claude.debug("mcp-config", mcpConfigJson);
     const message = JSON.stringify(session.event.payload, null, 2);
     const outcome = await runClaude({
       cwd: dir,
@@ -88,6 +91,7 @@ const run: SessionExecutor = async (
       systemPrompt: session.systemPrompt,
       message,
       socketPath: socket.path,
+      claude,
     });
     const entries: TranscriptEntry[] = [
       { role: "system", content: session.systemPrompt },
@@ -132,7 +136,9 @@ function runClaude(opts: {
   systemPrompt: string;
   message: string;
   socketPath: string;
+  claude: Logger;
 }): Promise<ClaudeResult> {
+  const { claude } = opts;
   return new Promise((resolve) => {
     let stdout = "";
     let stderr = "";
@@ -140,9 +146,9 @@ function runClaude(opts: {
     const finish = (result: ClaudeResult): void => {
       if (settled) return;
       settled = true;
-      console.log(`claude: exit code=${result.code} error=${result.error ?? "-"}`);
-      if (stdout) console.log(`claude: stdout:\n${stdout}`);
-      if (stderr) console.log(`claude: stderr:\n${stderr}`);
+      claude.info("exit", { code: result.code, error: result.error ?? null });
+      if (stdout) claude.debug("stdout", stdout);
+      if (stderr) claude.debug("stderr", stderr);
       resolve(result);
     };
     const args = [
@@ -169,7 +175,7 @@ function runClaude(opts: {
       "--print",
       opts.message,
     ];
-    console.log(`claude: spawn claude ${args.map((a) => JSON.stringify(a)).join(" ")}`);
+    claude.debug("spawn", "claude " + args.map((a) => JSON.stringify(a)).join(" "));
     const child = spawn("claude", args, {
       cwd: opts.cwd,
       // `--print` takes the prompt as an arg, not stdin; ignore stdin so

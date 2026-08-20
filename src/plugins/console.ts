@@ -16,6 +16,8 @@ import type { Plugin, ToolResult } from "../plugin.js";
 export const consolePlugin: Plugin = {
   name: "console",
   init(host) {
+    const log = host.log("console");
+    log.info("registering log tool");
     host.tools.register(
       {
         name: "log",

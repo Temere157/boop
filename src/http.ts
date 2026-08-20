@@ -4,12 +4,15 @@ import {
   type Server,
   type ServerResponse,
 } from "node:http";
+import { log } from "./log.js";
 import type {
   HttpRequest,
   HttpRoutes,
   HttpResponse,
   RouteHandler,
 } from "./plugin.js";
+
+const http = log("http");
 
 interface Route {
   readonly method: string;
@@ -86,7 +89,7 @@ export class HttpServer implements HttpRoutes {
     try {
       response = await route.handler(request);
     } catch (error) {
-      console.error("http route handler error", error);
+      http.error("route handler error", error);
       res.writeHead(500, { "content-type": "text/plain" });
       res.end("internal error");
       return;

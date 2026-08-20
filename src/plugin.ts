@@ -6,9 +6,9 @@
  *
  * A plugin receives a {@link PluginHost} at init time, which exposes the
  * core capabilities it may use — currently the ability to register HTTP
- * routes, to enqueue events, to register tools, and to register a
- * low-level session executor. The core wires concrete implementations of
- * these interfaces; the plugin never sees them.
+ * routes, to enqueue events, to register tools, to register a low-level
+ * session executor, and to obtain a scoped logger. The core wires
+ * concrete implementations of these interfaces; the plugin never sees them.
  */
 
 import type { Event } from "./event.js";
@@ -234,12 +234,40 @@ export interface Executors {
   register(executor: SessionExecutor): void;
 }
 
+/** Log severity levels, ordered `trace` < `debug` < `info` < `warn` < `error`. */
+export type LogLevel = "trace" | "debug" | "info" | "warn" | "error" | "silent";
+
+/**
+ * A scoped, level-filtered logger. Plugins obtain one via
+ * {@link PluginHost.log} at init time and reuse it for the plugin's life.
+ * Levels are `trace` < `debug` < `info` < `warn` < `error`; the threshold is
+ * set by the core (from `BOOP_LOG`), so a plugin just calls the level it
+ * wants and the core decides whether it surfaces.
+ */
+export interface Logger {
+  readonly scope: string;
+  trace(msg: string, ...args: unknown[]): void;
+  debug(msg: string, ...args: unknown[]): void;
+  info(msg: string, ...args: unknown[]): void;
+  warn(msg: string, ...args: unknown[]): void;
+  error(msg: string, ...args: unknown[]): void;
+}
+
+/**
+ * Capability to obtain a scoped {@link Logger}. Mirrors the core's own
+ * `log(scope)` so plugins and core log identically; a plugin names its
+ * subsystem and gets back a logger that emits under that scope.
+ */
+export type LogAccess = (scope: string) => Logger;
+
 /** Core capabilities a plugin may use. */
 export interface PluginHost {
   readonly events: EventSink;
   readonly http: HttpRoutes;
   readonly tools: Tools;
   readonly executors: Executors;
+  /** Obtain a scoped, level-filtered logger. */
+  readonly log: LogAccess;
 }
 
 /** A plugin. {@link init} registers routes/hooks/etc. on the host. */

@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { Event } from "./event.js";
 import { ExecutorRegistry } from "./executors.js";
 import { HttpServer } from "./http.js";
+import { log } from "./log.js";
 import { mainLoop, type EventExecutor } from "./main.js";
 import { McpUnixServer } from "./mcp/server.js";
 import type { EventSink, PluginHost } from "./plugin.js";
@@ -40,6 +41,7 @@ const pluginHost: PluginHost = {
   http: httpServer,
   tools: toolRegistry,
   executors: executorRegistry,
+  log,
 };
 
 // Builtin plugins. Each depends only on the Plugin contract, so any of
@@ -50,7 +52,7 @@ for (const plugin of builtinPlugins) {
 }
 
 await httpServer.listen(port, host);
-console.log(`http listening on http://${host}:${port}`);
+log("http").info("listening", `http://${host}:${port}`);
 
 // Per-event handler: prepare the session (system prompt + tools + event)
 // and hand it to the registered low-level session executor, then log the
@@ -65,7 +67,7 @@ let shuttingDown = false;
 const stop = (signal: string): void => {
   if (shuttingDown) return;
   shuttingDown = true;
-  console.log(`received ${signal}, shutting down`);
+  log("core").info("shutting down", signal);
   queue.close();
 };
 process.on("SIGINT", () => stop("SIGINT"));
