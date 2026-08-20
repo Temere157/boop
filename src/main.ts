@@ -4,14 +4,11 @@ import { EventQueue, QueueClosedError } from "./queue.js";
 /**
  * Handles a single dequeued event.
  *
- * The executor is responsible for spinning up a transient session, loading
- * relevant context from memory, running the LLM with its tools, flushing
- * anything worth remembering back to memory, and tearing the session down.
- * It is the whole "do the work" half of the main loop; the loop itself
- * only pulls and dispatches.
- *
- * TODO: implement. This is the session/memory/LLM side of the agent and is
- * the largest remaining piece.
+ * In the core, this is the session runner: it prepares a transient session
+ * for the event (system prompt, tools, …) and hands it to the registered
+ * low-level {@link SessionExecutor}, which owns the actual agentic loop
+ * (LLM ↔ tools) and returns a transcript the core logs (and, later,
+ * persists). The main loop itself only pulls and dispatches.
  */
 export type EventExecutor = (event: Event) => Promise<void>;
 

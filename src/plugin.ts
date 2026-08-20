@@ -6,9 +6,12 @@
  *
  * A plugin receives a {@link PluginHost} at init time, which exposes the
  * core capabilities it may use — currently the ability to register HTTP
- * routes, to enqueue events, and to register tools. The core wires
- * concrete implementations of these interfaces; the plugin never sees them.
+ * routes, to enqueue events, to register tools, and to register a
+ * low-level session executor. The core wires concrete implementations of
+ * these interfaces; the plugin never sees them.
  */
+
+import type { Event } from "./event.js";
 
 /**
  * Accepts an event into the queue. Hides {@link Event} construction (id,
@@ -108,11 +111,97 @@ export interface RegisteredTool {
  * Capability to register tools — actions the agent may take during a
  * session (call an API, read a file, send a message, …). Tools are
  * MCP-shaped so they can be exposed to executors that talk MCP (e.g. an
- * MCP server bridge) without translation, and the LLM-facing description is
- * exactly what a client would see.
+ * MCP server bridge) without translation, and the description the LLM sees
+ * is exactly what an MCP client would see.
  */
 export interface Tools {
   register(definition: ToolDefinition, handler: ToolHandler): void;
+}
+
+/**
+ * A tool call requested by the assistant: which tool, with what arguments,
+ * under a stable id so the matching result can be correlated.
+ */
+export interface ToolCall {
+  readonly id: string;
+  readonly name: string;
+  readonly args: Record<string, unknown>;
+}
+
+/**
+ * A single entry in a session transcript. The core prepares the first two
+ * entries (the system prompt and the event rendered as a user turn); the
+ * executor appends the rest as it runs the agentic loop. The shape is
+ * role-tagged and otherwise permissive (an index signature lets a
+ * provider-specific executor carry extra fields without changing this
+ * contract).
+ */
+export interface TranscriptEntry {
+  readonly role: "system" | "user" | "assistant" | "tool";
+  readonly content: string;
+  /** Assistant entries that request tool calls. */
+  readonly toolCalls?: readonly ToolCall[];
+  /** Tool entries: which call this result answers. */
+  readonly toolCallId?: string;
+  /** Tool entries: which tool was called. */
+  readonly toolName?: string;
+  /** Tool entries: the result the tool returned. */
+  readonly result?: ToolResult;
+  readonly [key: string]: unknown;
+}
+
+/**
+ * The full record of a session: an ordered list of transcript entries. This
+ * is what the executor returns; the core persists it (for now, just logs
+ * it) so each event's handling is inspectable after the fact.
+ */
+export interface SessionTranscript {
+  readonly entries: readonly TranscriptEntry[];
+}
+
+/**
+ * Lets a session executor invoke registered tools. {@link definitions} is
+ * the MCP-shaped list the LLM sees; {@link call} dispatches to the matching
+ * handler. The core wraps the raw {@link ToolRegistry} so a handler crash
+ * or an unknown tool comes back as a semantic {@link ToolResult} with
+ * `isError` rather than throwing, keeping the executor's loop running.
+ */
+export interface ToolInvocation {
+  readonly definitions: readonly ToolDefinition[];
+  call(name: string, args: Record<string, unknown>): Promise<ToolResult>;
+}
+
+/**
+ * A fully prepared transient session, handed to the low-level executor.
+ * The core has already decided which event this session is for, built the
+ * system prompt, and gathered the tools available to the agent (with a way
+ * to invoke them); the executor only has to run the agentic loop
+ * (LLM ↔ tools) and return a transcript. By the time the executor runs, no
+ * more preparation is needed — it is the whole "do the work" half.
+ */
+export interface PreparedSession {
+  readonly event: Event;
+  readonly systemPrompt: string;
+  readonly tools: ToolInvocation;
+}
+
+/**
+ * Runs a prepared session's agentic loop and returns its transcript. This
+ * is the low-level executor: it owns the LLM ↔ tool-call cycle and is the
+ * piece that is swapped to change provider/runtime (a real LLM, an MCP
+ * client bridge, a scripted stand-in, …). There is at most one registered.
+ */
+export type SessionExecutor = (
+  session: PreparedSession,
+) => Promise<SessionTranscript>;
+
+/**
+ * Capability to register the low-level session executor. Exactly one
+ * executor may be registered; a second registration is rejected because
+ * two executors would both try to own the per-event agentic loop.
+ */
+export interface Executors {
+  register(executor: SessionExecutor): void;
 }
 
 /** Core capabilities a plugin may use. */
@@ -120,6 +209,7 @@ export interface PluginHost {
   readonly events: EventSink;
   readonly http: HttpRoutes;
   readonly tools: Tools;
+  readonly executors: Executors;
 }
 
 /** A plugin. {@link init} registers routes/hooks/etc. on the host. */
