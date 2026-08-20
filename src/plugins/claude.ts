@@ -68,6 +68,7 @@ const run: SessionExecutor = async (
   const dir = await mkdtemp(join(tmpdir(), "boop-claude-"));
   const shimPath = join(dir, "mcp-shim.mjs");
   await writeFile(shimPath, SHIM, { mode: 0o755 });
+  console.log(`claude: socket=${socket.path} shim=${shimPath} cwd=${dir}`);
   try {
     const mcpConfig = {
       mcpServers: {
@@ -78,10 +79,12 @@ const run: SessionExecutor = async (
         },
       },
     };
+    const mcpConfigJson = JSON.stringify(mcpConfig);
+    console.log(`claude: mcp-config=${mcpConfigJson}`);
     const message = JSON.stringify(session.event.payload, null, 2);
     const outcome = await runClaude({
       cwd: dir,
-      mcpConfig,
+      mcpConfigJson,
       systemPrompt: session.systemPrompt,
       message,
       socketPath: socket.path,
@@ -125,7 +128,7 @@ interface ClaudeResult {
  */
 function runClaude(opts: {
   cwd: string;
-  mcpConfig: object;
+  mcpConfigJson: string;
   systemPrompt: string;
   message: string;
   socketPath: string;
@@ -137,28 +140,29 @@ function runClaude(opts: {
     const finish = (result: ClaudeResult): void => {
       if (settled) return;
       settled = true;
+      console.log(`claude: exit code=${result.code} error=${result.error ?? "-"}`);
+      if (stdout) console.log(`claude: stdout:\n${stdout}`);
+      if (stderr) console.log(`claude: stderr:\n${stderr}`);
       resolve(result);
     };
-    const child = spawn(
-      "claude",
-      [
-        "--safe-mode",
-        "--no-session-persistence",
-        "--mcp-config",
-        JSON.stringify(opts.mcpConfig),
-        "--strict-mcp-config",
-        "--tools",
-        "",
-        "--system-prompt",
-        opts.systemPrompt,
-        "--print",
-        opts.message,
-      ],
-      {
-        cwd: opts.cwd,
-        env: { ...process.env, BOOP_MCP_SOCKET: opts.socketPath },
-      },
-    );
+    const args = [
+      "--safe-mode",
+      "--no-session-persistence",
+      "--mcp-config",
+      opts.mcpConfigJson,
+      "--strict-mcp-config",
+      "--tools",
+      "",
+      "--system-prompt",
+      opts.systemPrompt,
+      "--print",
+      opts.message,
+    ];
+    console.log(`claude: spawn claude ${args.map((a) => JSON.stringify(a)).join(" ")}`);
+    const child = spawn("claude", args, {
+      cwd: opts.cwd,
+      env: { ...process.env, BOOP_MCP_SOCKET: opts.socketPath },
+    });
     child.stdout.on("data", (chunk: Buffer) => {
       stdout += chunk.toString("utf8");
     });
