@@ -57,9 +57,9 @@ await httpServer.listen(port, host);
 log("http").info("listening", `http://${host}:${port}`);
 
 // Per-event handler: prepare the session (system prompt + tools + event)
-// and hand it to the registered low-level session executor, then log the
-// returned transcript. Persistence of the transcript is a TODO; for now
-// logging is the record. See {@link SessionRunner}.
+// and hand it to the registered low-level session executor, then record
+// the returned transcript as JSONL (in the XDG state dir) and log it.
+// See {@link SessionRunner} and {@link startRecording}.
 const runner = new SessionRunner(toolRegistry, executorRegistry, mcpServer);
 const execute: EventExecutor = (event) => runner.run(event);
 

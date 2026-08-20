@@ -1,5 +1,6 @@
 import type { Event } from "./event.js";
 import { log } from "./log.js";
+import { startRecording } from "./record.js";
 import type { McpServer } from "./plugin.js";
 import type {
   PreparedSession,
@@ -17,9 +18,8 @@ const sessionLog = log("session");
  * and a plugin-supplied low-level {@link SessionExecutor}: for each event
  * it prepares a {@link PreparedSession} (event + system prompt + first
  * user message + tools with a safe invocation wrapper), hands it to the
- * registered executor, and logs
- * the returned transcript. Persistence of the transcript is a TODO; for now
- * logging is how each event's handling is recorded.
+ * registered executor, and persists the returned transcript as a JSONL
+ * recording (see {@link startRecording}) in addition to logging it.
  *
  * Preparation is entirely on the core side so the executor receives
  * something it can run directly: the system prompt and the first user
@@ -46,7 +46,9 @@ export class SessionRunner {
       return;
     }
     const session = this.prepare(event);
+    const recording = await startRecording(event);
     const transcript = await executor(session);
+    await recording.finish(transcript);
     this.log(event, transcript);
   }
 
@@ -87,7 +89,7 @@ export class SessionRunner {
   }
 
   private log(event: Event, transcript: { entries: readonly TranscriptEntry[] }): void {
-    sessionLog.info("transcript", { id: event.id, source: event.source });
+    sessionLog.debug("transcript", { id: event.id, source: event.source });
     for (const entry of transcript.entries) {
       this.logEntry(entry);
     }
@@ -99,20 +101,20 @@ export class SessionRunner {
       .filter((s) => s !== undefined)
       .map((s) => ` ${s}`)
       .join("");
-    sessionLog.info(`${tag}${suffix}: ${entry.content}`);
+    sessionLog.trace(`${tag}${suffix}: ${entry.content}`);
     if (typeof entry.thinking === "string" && entry.thinking.length > 0) {
-      sessionLog.info(`  thinking: ${entry.thinking}`);
+      sessionLog.trace(`  thinking: ${entry.thinking}`);
     }
     if (entry.toolCalls !== undefined) {
       for (const call of entry.toolCalls) {
-        sessionLog.info(`  -> ${call.name}(${JSON.stringify(call.args)}) [${call.id}]`);
+        sessionLog.trace(`  -> ${call.name}(${JSON.stringify(call.args)}) [${call.id}]`);
       }
     }
     if (entry.result !== undefined) {
       const text = entry.result.content
         .map((b) => b.text ?? "")
         .join("");
-      sessionLog.info(
+      sessionLog.trace(
         `  result isError=${entry.result.isError ?? false}: ${text}`,
       );
     }

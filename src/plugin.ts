@@ -152,8 +152,8 @@ export interface TranscriptEntry {
 
 /**
  * The full record of a session: an ordered list of transcript entries. This
- * is what the executor returns; the core persists it (for now, just logs
- * it) so each event's handling is inspectable after the fact.
+ * is what the executor returns; the core records it (JSONL in the XDG
+ * state dir) so each event's handling is inspectable after the fact.
  */
 export interface SessionTranscript {
   readonly entries: readonly TranscriptEntry[];
