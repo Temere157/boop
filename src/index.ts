@@ -1,13 +1,23 @@
-import { createServer } from "node:http";
+import type { Event } from "./event.js";
+import { mainLoop } from "./main.js";
+import { EventQueue } from "./queue.js";
 
-const port = Number(process.env.PORT ?? 3000);
-const host = process.env.HOST ?? "0.0.0.0";
+const queue = new EventQueue();
 
-const server = createServer((req, res) => {
-  res.writeHead(200, { "Content-Type": "application/json" });
-  res.end(JSON.stringify({ ok: true, path: req.url }));
-});
+// TODO: event executor. This is where a transient session is spawned per
+// event: load relevant context from memory, run the LLM with its tools,
+// flush anything worth remembering back to memory, then end the session.
+const execute = async (_event: Event): Promise<void> => {
+  // TODO: implement the event executor (sessions + memory + LLM + tools).
+};
 
-server.listen(port, host, () => {
-  console.log(`server listening on http://${host}:${port}`);
-});
+// Graceful shutdown: close the queue so a pending pull rejects and the loop
+// exits cleanly.
+const stop = (signal: string) => {
+  console.log(`received ${signal}, shutting down`);
+  queue.close();
+};
+process.on("SIGINT", () => stop("SIGINT"));
+process.on("SIGTERM", () => stop("SIGTERM"));
+
+await mainLoop(queue, execute);
