@@ -49,6 +49,22 @@ sessions.
 
 See [docs/architecture.md](docs/architecture.md) for the detailed design.
 
+## Configuration
+
+Boop reads `$XDG_CONFIG_HOME/boop/config.json` (default
+`~/.config/boop/config.json`); a missing file means defaults.
+
+```json
+{
+  "executor": "claude"
+}
+```
+
+`executor` selects, by id, the session executor that handles each
+event's session (`claude` is the id registered by the builtin claude
+executor plugin). `BOOP_EXECUTOR` overrides the file. With exactly one
+executor registered, no selection is needed.
+
 ## Status
 
 Boop is at the start of implementation. The repository currently holds a

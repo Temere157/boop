@@ -51,6 +51,16 @@ time.
 This makes each event's processing inspectable and isolated: a session is
 just "given this event and this remembered context, decide and act."
 
+### Session executors
+
+The session executor is the low-level piece that owns a prepared
+session's agentic loop (LLM ↔ tool calls) and returns the transcript. It
+is supplied by a plugin at init time, registered under a stable id, so
+several executors may be registered and the core selects which one to run
+(from the config file); the selection is made once at startup and an
+unknown id fails loudly. Exactly one executor runs a session; choosing a
+different id is how the LLM/runtime is swapped without touching the loop.
+
 ### Memory store
 
 Memory is the only thing that outlives a session. Before running, a session
@@ -94,6 +104,15 @@ session message lists the currently-open channels as a snapshot taken
 when the session is prepared, but the tool queries the registry live at
 call time — so a channel that closed between preparation and a `respond`
 call surfaces as a semantic error to the agent rather than a silent drop.
+
+## Configuration
+
+Boop reads a single JSON file, `$XDG_CONFIG_HOME/boop/config.json` (default
+`~/.config/boop/config.json`); a missing file is fine (all defaults), a
+malformed one fails startup. Today the only setting is `executor`, the id
+of the session executor to run each event's session; `BOOP_EXECUTOR`
+overrides the file. With no selection, the core runs the sole registered
+executor and refuses to guess when several are registered.
 
 ## Single-user
 
