@@ -267,19 +267,21 @@ export interface PreparedSession {
  * Runs a prepared session's agentic loop and returns its transcript. This
  * is the low-level executor: it owns the LLM ↔ tool-call cycle and is the
  * piece that is swapped to change provider/runtime (a real LLM, an MCP
- * client bridge, a scripted stand-in, …). There is at most one registered.
+ * client bridge, a scripted stand-in, …). Executors register under a
+ * stable id; the core runs the one it selects per event.
  */
 export type SessionExecutor = (
   session: PreparedSession,
 ) => Promise<SessionTranscript>;
 
 /**
- * Capability to register the low-level session executor. Exactly one
- * executor may be registered; a second registration is rejected because
- * two executors would both try to own the per-event agentic loop.
+ * Capability to register a low-level session executor under a stable id.
+ * Several executors may be registered (a duplicate id is rejected); the
+ * core selects which one runs each prepared session, so plugins register
+ * by id rather than claim "the" executor.
  */
 export interface Executors {
-  register(executor: SessionExecutor): void;
+  register(id: string, executor: SessionExecutor): void;
 }
 
 /** Log severity levels, ordered `trace` < `debug` < `info` < `warn` < `error`. */

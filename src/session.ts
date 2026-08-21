@@ -20,7 +20,7 @@ const sessionLog = log("session");
  * and a plugin-supplied low-level {@link SessionExecutor}: for each event
  * it prepares a {@link PreparedSession} (event + system prompt + first
  * user message + tools with a safe invocation wrapper), hands it to the
- * registered executor, and persists the returned transcript as a JSONL
+ * configured executor, and persists the returned transcript as a JSONL
  * recording (see {@link startRecording}) in addition to logging it.
  *
  * Preparation is entirely on the core side so the executor receives
@@ -36,15 +36,21 @@ export class SessionRunner {
     private readonly executors: ExecutorRegistry,
     private readonly mcp: McpServer,
     private readonly responses: ResponseChannelRegistry,
+    private readonly executorId: string | undefined,
   ) {}
 
   /** Per-event entry point; matches the {@link EventExecutor} signature. */
   async run(event: Event): Promise<void> {
-    const executor = this.executors.get();
+    const executor =
+      this.executorId === undefined
+        ? undefined
+        : this.executors.get(this.executorId);
     if (executor === undefined) {
       sessionLog.warn("no session executor registered; skipping event", {
         id: event.id,
         source: event.source,
+        executorId: this.executorId ?? null,
+        available: this.executors.ids(),
       });
       return;
     }

@@ -60,7 +60,7 @@ export const claudeExecutorPlugin: Plugin = {
   name: "claude-executor",
   init(host) {
     const claude = host.log("claude");
-    host.executors.register((session) => run(session, claude));
+    host.executors.register("claude", (session) => run(session, claude));
   },
 };
 

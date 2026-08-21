@@ -62,8 +62,33 @@ for (const plugin of builtinPlugins) {
 await httpServer.listen(port, host);
 log("http").info("listening", `http://${host}:${port}`);
 
+// Exactly one executor runs each event's session; the id is resolved at
+// startup: BOOP_EXECUTOR overrides, and with no override the sole
+// registered executor is used. Several registered executors is a
+// configuration error (the core can't guess which agentic loop to own);
+// none is not — the session runner warns and skips events until one is
+// registered.
+const executorIds = executorRegistry.ids();
+const requested = process.env.BOOP_EXECUTOR;
+let executorId: string | undefined;
+if (requested !== undefined) {
+  if (!executorIds.includes(requested)) {
+    throw new Error(
+      `no session executor registered with id "${requested}"; available: ${executorIds.join(", ")}`,
+    );
+  }
+  executorId = requested;
+} else if (executorIds.length === 1) {
+  executorId = executorIds[0];
+} else if (executorIds.length > 1) {
+  throw new Error(
+    `multiple session executors registered (${executorIds.join(", ")}); set BOOP_EXECUTOR to choose`,
+  );
+}
+log("core").info("executor", { id: executorId ?? null, available: executorIds });
+
 // Per-event handler: prepare the session (system prompt + tools + event)
-// and hand it to the registered low-level session executor, then record
+// and hand it to the configured low-level session executor, then record
 // the returned transcript as JSONL (in the XDG state dir) and log it.
 // See {@link SessionRunner} and {@link startRecording}.
 const runner = new SessionRunner(
@@ -71,6 +96,7 @@ const runner = new SessionRunner(
   executorRegistry,
   mcpServer,
   responseChannels,
+  executorId,
 );
 const execute: EventExecutor = (event) => runner.run(event);
 
