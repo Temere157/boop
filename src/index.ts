@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { configPath, loadConfig } from "./config.js";
 import type { Event } from "./event.js";
 import { ExecutorRegistry } from "./executors.js";
 import { HttpServer } from "./http.js";
@@ -16,6 +17,7 @@ import { ToolRegistry } from "./tools.js";
 
 const port = Number(process.env.PORT ?? 3000);
 const host = process.env.HOST ?? "0.0.0.0";
+const config = loadConfig();
 
 const queue = new EventQueue();
 const httpServer = new HttpServer();
@@ -63,13 +65,13 @@ await httpServer.listen(port, host);
 log("http").info("listening", `http://${host}:${port}`);
 
 // Exactly one executor runs each event's session; the id is resolved at
-// startup: BOOP_EXECUTOR overrides, and with no override the sole
-// registered executor is used. Several registered executors is a
-// configuration error (the core can't guess which agentic loop to own);
-// none is not — the session runner warns and skips events until one is
-// registered.
+// startup: BOOP_EXECUTOR overrides the config file's `executor` key, and
+// with no override the sole registered executor is used. Several
+// registered executors is a configuration error (the core can't guess
+// which agentic loop to own); none is not — the session runner warns and
+// skips events until one is registered.
 const executorIds = executorRegistry.ids();
-const requested = process.env.BOOP_EXECUTOR;
+const requested = process.env.BOOP_EXECUTOR ?? config.executor;
 let executorId: string | undefined;
 if (requested !== undefined) {
   if (!executorIds.includes(requested)) {
@@ -82,7 +84,7 @@ if (requested !== undefined) {
   executorId = executorIds[0];
 } else if (executorIds.length > 1) {
   throw new Error(
-    `multiple session executors registered (${executorIds.join(", ")}); set BOOP_EXECUTOR to choose`,
+    `multiple session executors registered (${executorIds.join(", ")}); set "executor" in ${configPath()} or BOOP_EXECUTOR to choose`,
   );
 }
 log("core").info("executor", { id: executorId ?? null, available: executorIds });
