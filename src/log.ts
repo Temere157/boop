@@ -30,12 +30,7 @@ const ORDER: readonly LogLevel[] = [
   "silent",
 ];
 
-function threshold(): LogLevel {
-  const v = (process.env.BOOP_LOG ?? "info").toLowerCase();
-  return (ORDER as readonly string[]).includes(v) ? (v as LogLevel) : "info";
-}
-
-let level = threshold();
+let level: LogLevel = "info";
 
 /** Change the active threshold at runtime (rarely needed). */
 export function setLevel(l: LogLevel): void {

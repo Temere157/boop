@@ -3,7 +3,7 @@ import { configPath, loadConfig } from "./config.js";
 import type { Event } from "./event.js";
 import { ExecutorRegistry } from "./executors.js";
 import { HttpServer } from "./http.js";
-import { log } from "./log.js";
+import { log, setLevel } from "./log.js";
 import { mainLoop, type EventExecutor } from "./main.js";
 import { McpUnixServer } from "./mcp/server.js";
 import type { EventSink, PluginHost } from "./plugin.js";
@@ -15,9 +15,12 @@ import { EventQueue } from "./queue.js";
 import { SessionRunner } from "./session.js";
 import { ToolRegistry } from "./tools.js";
 
-const port = Number(process.env.PORT ?? 3000);
-const host = process.env.HOST ?? "0.0.0.0";
 const config = loadConfig();
+
+setLevel(config.logLevel);
+
+const port = config.port;
+const host = config.host;
 
 const queue = new EventQueue();
 const httpServer = new HttpServer();
@@ -71,7 +74,7 @@ log("http").info("listening", `http://${host}:${port}`);
 // which agentic loop to own); none is not — the session runner warns and
 // skips events until one is registered.
 const executorIds = executorRegistry.ids();
-const requested = process.env.BOOP_EXECUTOR ?? config.executor;
+const requested = config.executor;
 let executorId: string | undefined;
 if (requested !== undefined) {
   if (!executorIds.includes(requested)) {
