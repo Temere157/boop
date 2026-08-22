@@ -8,5 +8,6 @@
     "declaration": false,
     "sourceMap": false
   },
-  "include": ["./**/*.ts", "../src/plugin.ts", "../src/event.ts"]
+  "include": ["./**/*.ts", "../src/plugin.ts", "../src/event.ts"],
+  "exclude": ["./webui/src"]
 }

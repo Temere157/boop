@@ -77,6 +77,36 @@
             runHook postInstall
           '';
         };
+
+        # Same shape as `typecheck-plugins`, but runs `tsc -p plugins/webui`
+        # against the browser-side webui sources — the DOM-lib,
+        # no-`@types/node` project under `plugins/webui/` (see
+        # plugins/webui/tsconfig.json). Browser code is separate from the
+        # server entry so it can use `document` (DOM lib) without the
+        # node-only `plugins/tsconfig.json` rejecting it.
+        checks.typecheck-webui = pkgs.buildNpmPackage {
+          pname = "boop";
+          version = "0.1.0";
+          src = ./.;
+          inherit nodejs;
+
+          npmDeps = pkgs.importNpmLock { npmRoot = ./.; };
+          npmConfigHook = pkgs.importNpmLock.npmConfigHook;
+
+          dontNpmBuild = true;
+
+          buildPhase = ''
+            runHook preBuild
+            npx tsc -p plugins/webui
+            runHook postBuild
+          '';
+
+          installPhase = ''
+            runHook preInstall
+            mkdir -p $out
+            runHook postInstall
+          '';
+        };
       }
     );
 }

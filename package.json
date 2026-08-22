@@ -10,7 +10,7 @@
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
     "start": "node dist/index.js",
-    "typecheck": "tsc --noEmit && tsc -p plugins"
+    "typecheck": "tsc --noEmit && tsc -p plugins && tsc -p plugins/webui"
   },
   "devDependencies": {
     "@types/node": "^26.2.0",
