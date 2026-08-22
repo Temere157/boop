@@ -4,12 +4,15 @@ import {
   type Server,
   type ServerResponse,
 } from "node:http";
+import type { Socket } from "node:net";
+import type { Duplex } from "node:stream";
 import { log } from "./log.js";
 import type {
   HttpRequest,
   HttpRoutes,
   HttpResponse,
   RouteHandler,
+  UpgradeHandler,
 } from "./plugin.js";
 
 const http = log("http");
@@ -18,6 +21,11 @@ interface Route {
   readonly method: string;
   readonly path: string;
   readonly handler: RouteHandler;
+}
+
+interface Upgrade {
+  readonly path: string;
+  readonly handler: UpgradeHandler;
 }
 
 /**
@@ -33,10 +41,19 @@ interface Route {
  */
 export class HttpServer implements HttpRoutes {
   private routes: Route[] = [];
+  private upgrades: Upgrade[] = [];
   private server: Server | null = null;
 
   route(method: string, path: string, handler: RouteHandler): void {
     this.routes.push({ method, path, handler });
+  }
+
+  upgrade(path: string, handler: UpgradeHandler): void {
+    // Replace any existing handler at the same path; there is no reload
+    // path today, but keeping the last registration wins avoids silent
+    // duplicates.
+    this.upgrades = this.upgrades.filter((u) => u.path !== path);
+    this.upgrades.push({ path, handler });
   }
 
   /** Start listening. Resolves once the server is accepting connections. */
@@ -44,6 +61,9 @@ export class HttpServer implements HttpRoutes {
     return new Promise((resolve, reject) => {
       this.server = createServer((req, res) => {
         void this.handle(req, res);
+      });
+      this.server.on("upgrade", (req, socket, head) => {
+        void this.handleUpgrade(req, socket, head);
       });
       const onError = (error: Error): void => reject(error);
       this.server.on("error", onError);
@@ -63,6 +83,34 @@ export class HttpServer implements HttpRoutes {
       }
       this.server.close(() => resolve());
     });
+  }
+
+  /**
+   * Dispatch an `upgrade` request to the matching path's handler, or
+   * destroy the socket if none matches. Errors thrown by a handler are
+   * logged and the socket is destroyed rather than left dangling.
+   *
+   * Node types the upgrade event's socket as `Duplex`; at runtime it is a
+   * real `net.Socket` (an HTTP server only upgrades TCP sockets), so it is
+   * safe to hand to {@link UpgradeHandler}s as a `Socket`.
+   */
+  private async handleUpgrade(
+    req: IncomingMessage,
+    socket: Duplex,
+    head: Buffer,
+  ): Promise<void> {
+    const pathname = this.toPathname(req.url);
+    const entry = this.upgrades.find((u) => u.path === pathname);
+    if (entry === undefined) {
+      socket.destroy();
+      return;
+    }
+    try {
+      entry.handler(req, socket as unknown as Socket, head);
+    } catch (error) {
+      http.error("upgrade handler error", error);
+      socket.destroy();
+    }
   }
 
   private async handle(

@@ -11,6 +11,8 @@
  * concrete implementations of these interfaces; the plugin never sees them.
  */
 
+import type { IncomingMessage } from "node:http";
+import type { Socket } from "node:net";
 import type { Event } from "./event.js";
 
 /**
@@ -82,9 +84,34 @@ export type RouteHandler = (
   req: HttpRequest,
 ) => Promise<HttpResponse> | HttpResponse;
 
-/** Capability to register HTTP routes on the shared core server. */
+/**
+ * Handles a single matched HTTP `upgrade` request (e.g. a WebSocket
+ * handshake). Unlike {@link RouteHandler}, the handler receives the *raw*
+ * `IncomingMessage`, socket, and the leading bytes already read, because an
+ * upgrade handler owns the protocol negotiated on that socket (e.g. `ws`'s
+ * `handleUpgrade`) and needs the live request stream rather than a buffered
+ * body. The server destroys unmatched upgrade sockets.
+ */
+export type UpgradeHandler = (
+  req: IncomingMessage,
+  socket: Socket,
+  head: Buffer,
+) => void;
+
+/**
+ * Capability to register HTTP routes on the shared core server. Both
+ * request/response routes ({@link route}) and `upgrade` routes
+ * ({@link upgrade}, for WebSocket handshakes) are path-matched exactly.
+ */
 export interface HttpRoutes {
   route(method: string, path: string, handler: RouteHandler): void;
+  /**
+   * Register a handler for `upgrade` requests at `path` (WebSockets, etc.).
+   * At most one handler per path; a later registration overwrites an earlier
+   * one (so a plugin can re-register on reload, though there is no reload
+   * path today).
+   */
+  upgrade(path: string, handler: UpgradeHandler): void;
 }
 
 /**
