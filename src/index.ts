@@ -1,5 +1,8 @@
 import { randomUUID } from "node:crypto";
+import { mkdir } from "node:fs/promises";
+import { join } from "node:path";
 import { configPath, loadConfig } from "./config.js";
+import { boopStateDir } from "./paths.js";
 import type { Event } from "./event.js";
 import { ExecutorRegistry } from "./executors.js";
 import { HttpServer } from "./http.js";
@@ -12,6 +15,7 @@ import { ResponseChannelRegistry, registerRespondTool } from "./responses.js";
 import { claudeExecutorPlugin } from "./plugins/claude.js";
 import { consolePlugin } from "./plugins/console.js";
 import { httpIngestPlugin } from "./plugins/ingest.js";
+import { shortTermMemoryPlugin } from "./plugins/memory.js"
 import { EventQueue } from "./queue.js";
 import { SessionRunner } from "./session.js";
 import { ToolRegistry } from "./tools.js";
@@ -50,20 +54,32 @@ const eventSink: EventSink = {
   },
 };
 
-const pluginHost: PluginHost = {
-  events: eventSink,
-  http: httpServer,
-  tools: toolRegistry,
-  executors: executorRegistry,
-  responses: responseChannels,
-  prepare: preparerRegistry,
-  log,
-};
+// Per-plugin state directory base: `{boopStateDir}/plugins/{name}/`.
+const pluginsStateDir = join(boopStateDir(), "plugins");
 
 // Builtin plugins. Each depends only on the Plugin contract, so any of
-// these could be extracted into its own package without changes.
-const builtinPlugins = [httpIngestPlugin, consolePlugin, claudeExecutorPlugin];
+// these could be extracted into its own package without changes. Each gets
+// its own `paths.stateDir` (created before init) so a plugin can keep files
+// without colliding with another plugin.
+const builtinPlugins = [
+  httpIngestPlugin,
+  consolePlugin,
+  shortTermMemoryPlugin,
+  claudeExecutorPlugin,
+];
 for (const plugin of builtinPlugins) {
+  const stateDir = join(pluginsStateDir, plugin.name);
+  await mkdir(stateDir, { recursive: true });
+  const pluginHost: PluginHost = {
+    events: eventSink,
+    http: httpServer,
+    tools: toolRegistry,
+    executors: executorRegistry,
+    responses: responseChannels,
+    prepare: preparerRegistry,
+    log,
+    paths: { stateDir },
+  };
   await plugin.init(pluginHost);
 }
 

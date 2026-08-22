@@ -365,6 +365,24 @@ export interface Logger {
  */
 export type LogAccess = (scope: string) => Logger;
 
+/**
+ * Per-plugin filesystem paths. Each plugin gets its own subtrees under the
+ * XDG state (and, later, config) dirs, scoped by plugin name, so a plugin
+ * can read and write files there without colliding with another plugin.
+ * The core creates the state directory before `init` runs; a plugin reads
+ * and writes files in it without any mkdir. This is the plugin-side surface
+ * of the memory store: anything a plugin must keep between sessions lives
+ * in {@link PluginPaths.stateDir}.
+ */
+export interface PluginPaths {
+  /**
+   * Absolute path to this plugin's persistent state directory
+   * (`{boopStateDir}/plugins/{name}/`), already created. Use for data the
+   * plugin must keep between sessions (memory, caches, …).
+   */
+  readonly stateDir: string;
+}
+
 /** Core capabilities a plugin may use. */
 export interface PluginHost {
   readonly events: EventSink;
@@ -377,6 +395,8 @@ export interface PluginHost {
   readonly prepare: SessionPreparers;
   /** Obtain a scoped, level-filtered logger. */
   readonly log: LogAccess;
+  /** This plugin's filesystem paths (state directory created before init runs). */
+  readonly paths: PluginPaths;
 }
 
 /** A plugin. {@link init} registers routes/hooks/etc. on the host. */

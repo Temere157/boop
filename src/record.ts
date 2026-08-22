@@ -1,6 +1,6 @@
 import { appendFile, mkdir, open } from "node:fs/promises";
-import { homedir } from "node:os";
 import { join } from "node:path";
+import { boopStateDir } from "./paths.js";
 import type { Event } from "./event.js";
 import { log } from "./log.js";
 import type { SessionTranscript } from "./plugin.js";
@@ -13,8 +13,7 @@ const recordLog = log("record");
  * Directory spec). Created lazily on the first recording.
  */
 function sessionsDir(): string {
-  const state = process.env.XDG_STATE_HOME ?? join(homedir(), ".local", "state");
-  return join(state, "boop", "sessions");
+  return join(boopStateDir(), "sessions");
 }
 
 /**

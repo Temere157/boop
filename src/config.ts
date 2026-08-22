@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
-import { homedir } from "node:os";
 import { join } from "node:path";
+import { boopConfigDir } from "./paths.js";
 import type { LogLevel } from "./plugin.js";
 
 /** Every valid {@link LogLevel}; used to validate the config and `BOOP_LOG`. */
@@ -37,8 +37,7 @@ export interface BoopConfig {
  * {@link startRecording}).
  */
 export function configPath(): string {
-  const config = process.env.XDG_CONFIG_HOME ?? join(homedir(), ".config");
-  return join(config, "boop", "config.json");
+  return join(boopConfigDir(), "config.json");
 }
 
 /**
