@@ -170,6 +170,30 @@ export interface ToolCall {
 }
 
 /**
+ * An input message seeding a session's conversation: one of the user or
+ * assistant turns that the agent runtime starts from. Distinct from
+ * {@link TranscriptEntry} (the output record), which carries tool-call and
+ * result fields the input never has.
+ *
+ * There is no `system` role here: the system prompt is kept separate on
+ * {@link PreparedSession} so executors that take it as a distinct argument
+ * (e.g. claude's `--system-prompt`) can pass it through unchanged. A
+ * session may carry multiple user messages (e.g. the event plus
+ * memory-injected context); executors that accept only a single prompt
+ * merge them, while turn-based executors pass them through as turns.
+ * The shape is otherwise permissive (an index signature lets a
+ * provider-specific executor carry extra fields without changing this
+ * contract).
+ */
+export type SessionMessageRole = "user" | "assistant";
+
+export interface SessionMessage {
+  readonly role: SessionMessageRole;
+  readonly content: string;
+  readonly [key: string]: unknown;
+}
+
+/**
  * A single entry in a session transcript. The core prepares the first two
  * entries (the system prompt and the event rendered as a user turn); the
  * executor appends the rest as it runs the agentic loop. The shape is
@@ -238,32 +262,6 @@ export interface McpServer {
 }
 
 /**
- * A fully prepared transient session, handed to the low-level executor.
- * The core has already decided which event this session is for, built the
- * system prompt and the first user message (which carries the event), and
- * gathered the tools available to the agent (with a way to invoke them);
- * the executor only has to run the agentic loop (LLM ↔ tools) and return
- * a transcript. By the time the executor runs, no more preparation is
- * needed — it is the whole "do the work" half.
- *
- * {@link mcp} is an opt-in path for executors whose runtime speaks MCP: it
- * hands out a fresh unix socket serving {@link tools} over the MCP stdio
- * protocol. An executor that calls tools directly can ignore it.
- */
-export interface PreparedSession {
-  readonly event: Event;
-  readonly systemPrompt: string;
-  /**
-   * The first user message of the session: the event rendered as a user
-   * turn. The executor passes this to its agent runtime as the prompt,
-   * keeping the event out of the system prompt (which is fixed role text).
-   */
-  readonly firstUserMessage: string;
-  readonly tools: ToolInvocation;
-  readonly mcp: McpServer;
-}
-
-/**
  * Runs a prepared session's agentic loop and returns its transcript. This
  * is the low-level executor: it owns the LLM ↔ tool-call cycle and is the
  * piece that is swapped to change provider/runtime (a real LLM, an MCP
@@ -273,6 +271,63 @@ export interface PreparedSession {
 export type SessionExecutor = (
   session: PreparedSession,
 ) => Promise<SessionTranscript>;
+
+/**
+ * A hook a plugin may register to adjust a prepared session before the
+ * low-level executor runs. The preparer receives the {@link PreparedSession}
+ * and mutates it in place — typically by adding, editing, or reordering
+ * entries in {@link PreparedSession.messages} (e.g. injecting context
+ * loaded from memory). There is no ordering guarantee among preparers and
+ * no return value; a preparer that needs to do async work (such as a memory
+ * fetch) may return a promise the core awaits.
+ */
+export type SessionPreparer = (
+  session: PreparedSession,
+) => void | Promise<void>;
+
+/**
+ * Capability to register a session preparer. Preparers run after the core
+ * has seeded the system prompt and the first user message and before the
+ * executor runs; registration order is not significant (no priority), and
+ * a duplicate function may be registered again.
+ */
+export interface SessionPreparers {
+  register(preparer: SessionPreparer): void;
+}
+
+/**
+ * A fully prepared transient session, handed to the low-level executor.
+ * The core has already decided which event this session is for, built the
+ * system prompt and the first user message (which carries the event), and
+ * gathered the tools available to the agent (with a way to invoke them);
+ * the executor only has to run the agentic loop (LLM ↔ tools) and return
+ * a transcript. By the time the executor runs, no more preparation is
+ * needed — it is the whole "do the work" half.
+ *
+ * The system prompt is kept as a separate string (rather than a
+ * `system`-role message in {@link messages}) so executors that take it as
+ * a distinct argument — e.g. claude's `--system-prompt` — can pass it
+ * through unchanged. {@link messages} is the ordered user/assistant turns;
+ * it is mutable because registered {@link SessionPreparer}s adjust it in
+ * place between seeding and the executor running.
+ *
+ * {@link mcp} is an opt-in path for executors whose runtime speaks MCP: it
+ * hands out a fresh unix socket serving {@link tools} over the MCP stdio
+ * protocol. An executor that calls tools directly can ignore it.
+ */
+export interface PreparedSession {
+  readonly event: Event;
+  readonly systemPrompt: string;
+  /**
+   * The ordered user/assistant turns seeding the session. Seeded with a
+   * single user message carrying the event; registered preparers may add,
+   * edit, or reorder entries (e.g. injected memory context) before the
+   * executor runs. Mutable on purpose — preparers mutate it in place.
+   */
+  messages: SessionMessage[];
+  readonly tools: ToolInvocation;
+  readonly mcp: McpServer;
+}
 
 /**
  * Capability to register a low-level session executor under a stable id.
@@ -318,6 +373,8 @@ export interface PluginHost {
   readonly executors: Executors;
   /** Register/unregister response channels (the reply-side plugin boundary). */
   readonly responses: ResponseChannels;
+  /** Register a session preparer to adjust a prepared session's messages before the executor runs. */
+  readonly prepare: SessionPreparers;
   /** Obtain a scoped, level-filtered logger. */
   readonly log: LogAccess;
 }

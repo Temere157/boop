@@ -89,13 +89,19 @@ const run = async (
       cwd: dir,
       mcpConfigJson,
       systemPrompt: session.systemPrompt,
-      message: session.firstUserMessage,
+      // claude `--print` takes a single prompt; merge the prepared user/
+      // assistant turns into one. Today the seed is a single user message,
+      // but preparers may add context user messages, so join all of them.
+      message: session.messages.map((m) => m.content).join("\n\n"),
       socketPath: socket.path,
       claude,
     });
     const entries: TranscriptEntry[] = [
       { role: "system", content: session.systemPrompt },
-      { role: "user", content: session.firstUserMessage },
+      ...session.messages.map((m): TranscriptEntry => ({
+        role: m.role,
+        content: m.content,
+      })),
     ];
     if (outcome.error !== undefined) {
       entries.push({

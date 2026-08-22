@@ -5,11 +5,13 @@ import type {
   McpServer,
   PreparedSession,
   ResponseChannel,
+  SessionMessage,
   ToolInvocation,
   ToolResult,
   TranscriptEntry,
 } from "./plugin.js";
 import type { ExecutorRegistry } from "./executors.js";
+import type { PreparerRegistry } from "./preparers.js";
 import type { ResponseChannelRegistry } from "./responses.js";
 import type { ToolRegistry } from "./tools.js";
 
@@ -36,6 +38,7 @@ export class SessionRunner {
     private readonly executors: ExecutorRegistry,
     private readonly mcp: McpServer,
     private readonly responses: ResponseChannelRegistry,
+    private readonly preparers: PreparerRegistry,
     private readonly executorId: string | undefined,
   ) {}
 
@@ -54,25 +57,39 @@ export class SessionRunner {
       });
       return;
     }
-    const session = this.prepare(event);
+    const session = await this.prepare(event);
     const recording = await startRecording(event);
     const transcript = await executor(session);
     await recording.finish(transcript);
     this.log(event, transcript);
   }
 
-  private prepare(event: Event): PreparedSession {
+  /**
+   * Builds a {@link PreparedSession} for `event`: the system prompt, the
+   * event rendered as the first user message, and the tools (wrapped so a
+   * crashing or unknown tool comes back as a semantic result). Then runs
+   * every registered session preparer in registration order, letting each
+   * mutate `session.messages` (e.g. inject memory context) before the
+   * executor runs. No preparer ordering is guaranteed.
+   */
+  private async prepare(event: Event): Promise<PreparedSession> {
     const tools: ToolInvocation = {
       definitions: this.tools.all.map((t) => t.definition),
       call: (name, args) => this.callTool(name, args),
     };
-    return {
+    const session: PreparedSession = {
       event,
       systemPrompt: buildSystemPrompt(),
-      firstUserMessage: buildFirstUserMessage(event, this.responses.all),
+      messages: [
+        { role: "user", content: buildFirstUserMessage(event, this.responses.all) },
+      ],
       tools,
       mcp: this.mcp,
     };
+    for (const prepare of this.preparers.all) {
+      await prepare(session);
+    }
+    return session;
   }
 
   private async callTool(
@@ -133,8 +150,9 @@ export class SessionRunner {
 /**
  * Builds the system prompt for a session. The prompt is fixed role text —
  * the event itself is delivered as the first user message (see
- * {@link buildFirstUserMessage}); richer context (loaded from memory) will
- * be appended here as memory is built.
+ * {@link buildFirstUserMessage}) and richer context is added by registered
+ * {@link SessionPreparer}s adjusting {@link PreparedSession.messages}, not
+ * by extending this prompt.
  */
 function buildSystemPrompt(): string {
   return [
@@ -151,15 +169,17 @@ function buildSystemPrompt(): string {
 }
 
 /**
- * Renders the event as the session's first user message, so the event
- * arrives as a normal user turn rather than being baked into the system
- * prompt. The message also enumerates every currently-open response
- * channel — not just one tied to this event, since channels are
- * independent of events: an eternal SMS channel is listed in every
- * session message while a transient webui or HTTP ingest channel appears
- * only while its owner is holding it open. This is a snapshot taken at
- * `prepare()` time as a hint; the `respond` tool queries the registry
- * live, so a channel listed here may already be gone by call time.
+ * Renders the event as the session's first user message (the seed entry of
+ * {@link PreparedSession.messages}), so the event arrives as a normal user
+ * turn rather than being baked into the system prompt. The message also
+ * enumerates every currently-open response channel — not just one tied to
+ * this event, since channels are independent of events: an eternal SMS
+ * channel is listed in every session message while a transient webui or
+ * HTTP ingest channel appears only while its owner is holding it open.
+ * This is a snapshot taken at `prepare()` time as a hint; the `respond`
+ * tool queries the registry live, so a channel listed here may already be
+ * gone by call time. Registered {@link SessionPreparer}s may add further
+ * user/assistant messages after this seed.
  */
 function buildFirstUserMessage(
   event: Event,

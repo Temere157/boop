@@ -61,6 +61,16 @@ several executors may be registered and the core selects which one to run
 unknown id fails loudly. Exactly one executor runs a session; choosing a
 different id is how the LLM/runtime is swapped without touching the loop.
 
+A prepared session carries the event, a separate system prompt string,
+and an ordered, mutable list of user/assistant messages (the system
+prompt is kept separate so executors that take it as a distinct argument
+— e.g. claude's `--system-prompt` — pass it through unchanged). Plugins
+may register a *session preparer*: a hook that mutates that message list
+before the executor runs. Memory/context injection is the expected first
+user — loading relevant memory into the session is a builtin preparer,
+not baked into the loop. There is no ordering or priority among
+preparers; every registered one runs for every session.
+
 ### Memory store
 
 Memory is the only thing that outlives a session. Before running, a session

@@ -7,6 +7,7 @@ import { log, setLevel } from "./log.js";
 import { mainLoop, type EventExecutor } from "./main.js";
 import { McpUnixServer } from "./mcp/server.js";
 import type { EventSink, PluginHost } from "./plugin.js";
+import { PreparerRegistry } from "./preparers.js";
 import { ResponseChannelRegistry, registerRespondTool } from "./responses.js";
 import { claudeExecutorPlugin } from "./plugins/claude.js";
 import { consolePlugin } from "./plugins/console.js";
@@ -28,6 +29,7 @@ const toolRegistry = new ToolRegistry();
 const executorRegistry = new ExecutorRegistry();
 const mcpServer = new McpUnixServer("boop", "0.1.0");
 const responseChannels = new ResponseChannelRegistry();
+const preparerRegistry = new PreparerRegistry();
 // The `respond` tool is core (the plugin boundary is the channels, not the
 // tool), so it is registered here rather than by a plugin.
 registerRespondTool(toolRegistry, responseChannels);
@@ -54,6 +56,7 @@ const pluginHost: PluginHost = {
   tools: toolRegistry,
   executors: executorRegistry,
   responses: responseChannels,
+  prepare: preparerRegistry,
   log,
 };
 
@@ -101,6 +104,7 @@ const runner = new SessionRunner(
   executorRegistry,
   mcpServer,
   responseChannels,
+  preparerRegistry,
   executorId,
 );
 const execute: EventExecutor = (event) => runner.run(event);
