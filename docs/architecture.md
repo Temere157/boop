@@ -36,12 +36,17 @@ only consumes the queue.
 
 Plugins live in a top-level `plugins/` directory and are discovered at
 startup by scanning one or more plugin directories in order. Each plugin
-is a plain `.ts` file loaded via dynamic `import()`, kept to erasable
+is either a single `.ts`/`.js` file or a package directory whose entry is
+resolved from its `package.json` (`exports["."]` → `main` → `module`, or
+an `index.{ts,js}` fallback); Node resolves a package's dependencies from
+the entry's location, so a package with its own deps — or one
+nix-symlinked into place with its deps alongside — loads the same way as a
+dependency-less directory. Source `.ts` plugins stay within erasable
 syntax (no enums, namespaces, parameter properties) so Node's type
-stripping can load it without a build step, and imports boop's contract
-only as types (`import type`) so the boop specifier is erased at runtime
-and never has to resolve. A plugin name found in an earlier directory wins;
-a later directory can't shadow it. The same mechanism backs every
+stripping loads them without a build step, and import boop's contract only
+as types (`import type`) so the boop specifier is erased at runtime and
+never has to resolve. A plugin name found in an earlier directory wins; a
+later directory can't shadow it. The same mechanism backs every
 pluggable piece below — executors, tools, memory, response channels are
 all just plugins registering on the host.
 
