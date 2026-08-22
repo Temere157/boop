@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { configPath, loadConfig } from "./config.js";
 import { boopStateDir } from "./paths.js";
 import type { Event } from "./event.js";
@@ -12,10 +13,7 @@ import { McpUnixServer } from "./mcp/server.js";
 import type { EventSink, PluginHost } from "./plugin.js";
 import { PreparerRegistry } from "./preparers.js";
 import { ResponseChannelRegistry, registerRespondTool } from "./responses.js";
-import { claudeExecutorPlugin } from "./plugins/claude.js";
-import { consolePlugin } from "./plugins/console.js";
-import { httpIngestPlugin } from "./plugins/ingest.js";
-import { shortTermMemoryPlugin } from "./plugins/memory.js"
+import { loadPlugins } from "./load-plugins.js";
 import { EventQueue } from "./queue.js";
 import { SessionRunner } from "./session.js";
 import { ToolRegistry } from "./tools.js";
@@ -57,17 +55,16 @@ const eventSink: EventSink = {
 // Per-plugin state directory base: `{boopStateDir}/plugins/{name}/`.
 const pluginsStateDir = join(boopStateDir(), "plugins");
 
-// Builtin plugins. Each depends only on the Plugin contract, so any of
-// these could be extracted into its own package without changes. Each gets
-// its own `paths.stateDir` (created before init) so a plugin can keep files
+// Plugin directories scanned at startup, in order. For now just the core
+// plugins shipped in `plugins/`, resolved relative to this module so it
+// works whether this runs from `src/` under tsx or `dist/` compiled.
+const pluginDirs = [fileURLToPath(new URL("../plugins/", import.meta.url))];
+const plugins = await loadPlugins(pluginDirs);
+// Each plugin depends only on the Plugin contract, so any of these could
+// be extracted into its own package without changes. Each gets its own
+// `paths.stateDir` (created before init) so a plugin can keep files
 // without colliding with another plugin.
-const builtinPlugins = [
-  httpIngestPlugin,
-  consolePlugin,
-  shortTermMemoryPlugin,
-  claudeExecutorPlugin,
-];
-for (const plugin of builtinPlugins) {
+for (const plugin of plugins) {
   const stateDir = join(pluginsStateDir, plugin.name);
   await mkdir(stateDir, { recursive: true });
   const pluginHost: PluginHost = {

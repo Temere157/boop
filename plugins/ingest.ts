@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { Plugin, ResponseChannel } from "../plugin.js";
+import type { Plugin, ResponseChannel } from "@boop/plugin";
 
 /** Resolves after `ms`, for the ingest reply timeout. */
 const sleep = (ms: number): Promise<void> =>

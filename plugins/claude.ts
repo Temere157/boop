@@ -9,7 +9,7 @@ import type {
   SessionExecutor,
   SessionTranscript,
   TranscriptEntry,
-} from "../plugin.js";
+} from "@boop/plugin";
 
 /**
  * A stdio-bridge shim, written to each session's tempdir and launched by

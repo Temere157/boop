@@ -34,6 +34,17 @@ Providers are plugins: they implement a small interface and register with
 the agent. The main loop does not know or care where events come from — it
 only consumes the queue.
 
+Plugins live in a top-level `plugins/` directory and are discovered at
+startup by scanning one or more plugin directories in order. Each plugin
+is a plain `.ts` file loaded via dynamic `import()`, kept to erasable
+syntax (no enums, namespaces, parameter properties) so Node's type
+stripping can load it without a build step, and imports boop's contract
+only as types (`import type`) so the boop specifier is erased at runtime
+and never has to resolve. A plugin name found in an earlier directory wins;
+a later directory can't shadow it. The same mechanism backs every
+pluggable piece below — executors, tools, memory, response channels are
+all just plugins registering on the host.
+
 ### Event queue
 
 A FIFO of pending events. Providers push; the loop pulls. The queue is the

@@ -1,6 +1,6 @@
 import { open, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import type { Plugin, ToolResult } from "../plugin.js";
+import type { Plugin, ToolResult } from "@boop/plugin";
 
 /** Soft cap; writes above this are logged but not blocked. */
 const SOFT_CAP_BYTES = 8192;

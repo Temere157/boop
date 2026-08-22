@@ -1,0 +1,12 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "erasableSyntaxOnly": true,
+    "rootDir": "..",
+    "paths": { "@boop/plugin": ["../src/plugin.ts"] },
+    "declaration": false,
+    "sourceMap": false
+  },
+  "include": ["./**/*.ts", "../src/plugin.ts", "../src/event.ts"]
+}

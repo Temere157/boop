@@ -1,4 +1,4 @@
-import type { Plugin, ToolResult } from "../plugin.js";
+import type { Plugin, ToolResult } from "@boop/plugin";
 
 /**
  * A builtin console plugin. It registers a single tool — `log` — that lets

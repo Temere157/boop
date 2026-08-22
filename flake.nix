@@ -49,6 +49,34 @@
             runHook postInstall
           '';
         };
+
+        # Same shape as `typecheck`, but runs `tsc -p plugins` against the
+        # `plugins/` project — the erasable-syntax-only, directly-loaded
+        # plugins (see plugins/tsconfig.json). `noEmit` lives in the config
+        # because `tsc -p` cannot be combined with `--noEmit`.
+        checks.typecheck-plugins = pkgs.buildNpmPackage {
+          pname = "boop";
+          version = "0.1.0";
+          src = ./.;
+          inherit nodejs;
+
+          npmDeps = pkgs.importNpmLock { npmRoot = ./.; };
+          npmConfigHook = pkgs.importNpmLock.npmConfigHook;
+
+          dontNpmBuild = true;
+
+          buildPhase = ''
+            runHook preBuild
+            npx tsc -p plugins
+            runHook postBuild
+          '';
+
+          installPhase = ''
+            runHook preInstall
+            mkdir -p $out
+            runHook postInstall
+          '';
+        };
       }
     );
 }
