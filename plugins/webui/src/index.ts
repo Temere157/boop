@@ -16,6 +16,8 @@ const sendButton = document.getElementById("composer-send") as HTMLButtonElement
 const CLIENT_ID_KEY = "boop.client-id";
 /** `sessionStorage` key for the per-tab instance id (cleared when the tab closes, so a new tab gets a new id). */
 const INSTANCE_ID_KEY = "boop.instance-id";
+/** `sessionStorage` key for the rendered message history (cleared when the tab closes, so a fresh tab starts empty, but a reload replays the conversation in place). */
+const MESSAGES_KEY = "boop.messages";
 
 /** A v4 UUID; `crypto.randomUUID` in secure contexts (HTTPS, localhost), with a `Math.random` fallback for insecure ones (plain HTTP on a LAN IP) so the ids still exist where `randomUUID` is unavailable. */
 function uuid(): string {
@@ -27,6 +29,35 @@ function uuid(): string {
     const v = c === "x" ? r : (r & 0x3) | 0x8;
     return v.toString(16);
   });
+}
+
+/** A rendered message bubble persisted across reloads within the same tab. */
+interface HistoryEntry {
+  role: "user" | "agent";
+  text: string;
+}
+
+/** Reads the persisted message history for this tab, or an empty array if none is stored or it is malformed, so a corrupt value never breaks the page. */
+function loadHistory(): HistoryEntry[] {
+  const raw = sessionStorage.getItem(MESSAGES_KEY);
+  if (raw === null) return [];
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return [];
+  }
+  if (!Array.isArray(parsed)) return [];
+  const out: HistoryEntry[] = [];
+  for (const entry of parsed) {
+    if (typeof entry !== "object" || entry === null) continue;
+    const role = (entry as { role?: unknown }).role;
+    const text = (entry as { text?: unknown }).text;
+    if (role !== "user" && role !== "agent") continue;
+    if (typeof text !== "string") continue;
+    out.push({ role, text });
+  }
+  return out;
 }
 
 /** Reads `key` from `storage`, generating and persisting a fresh UUID if it is absent, so the returned id is stable across reloads for that storage's lifetime. */
@@ -54,7 +85,12 @@ const run = (
     );
   }
 
-  /** Append a message bubble and stick to the bottom if we were already there. */
+  /** The rendered message history for this tab, persisted to `sessionStorage` so a reload replays it. */
+  const history: HistoryEntry[] = loadHistory();
+  /** Suppress persistence while replaying the loaded history so it is not re-written verbatim. */
+  let recording = true;
+
+  /** Append a message bubble, stick to the bottom if we were already there, and persist it to the tab's history so a reload replays it. */
   function addMessage(role: "user" | "agent", text: string): void {
     const stick = atBottom();
     const li = document.createElement("li");
@@ -62,6 +98,10 @@ const run = (
     li.textContent = text;
     stream.appendChild(li);
     if (stick) stream.scrollTop = stream.scrollHeight;
+    if (recording) {
+      history.push({ role, text });
+      sessionStorage.setItem(MESSAGES_KEY, JSON.stringify(history));
+    }
   }
 
   function setConnected(connected: boolean): void {
@@ -137,6 +177,11 @@ const run = (
       socket.close();
     });
   }
+
+  // Replay the persisted message history for this tab so a reload restores the conversation in place.
+  recording = false;
+  for (const { role, text } of history) addMessage(role, text);
+  recording = true;
 
   setConnected(false);
   connect();
