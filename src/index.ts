@@ -16,6 +16,7 @@ import { ResponseChannelRegistry, registerRespondTool } from "./responses.js";
 import { loadPlugins } from "./load-plugins.js";
 import { EventQueue } from "./queue.js";
 import { SessionRunner } from "./session.js";
+import { StatusBus } from "./status.js";
 import { ToolRegistry } from "./tools.js";
 
 const config = loadConfig();
@@ -32,6 +33,8 @@ const executorRegistry = new ExecutorRegistry();
 const mcpServer = new McpUnixServer("boop", "0.1.0");
 const responseChannels = new ResponseChannelRegistry();
 const preparerRegistry = new PreparerRegistry();
+// Shared bus the main loop emits busy/idle transitions onto around every event it handles; plugins (the webui) subscribe to mirror it to their clients.
+const statusBus = new StatusBus();
 // The `respond` tool is core (the plugin boundary is the channels, not the tool), so it is registered here rather than by a plugin.
 registerRespondTool(toolRegistry, responseChannels);
 
@@ -72,6 +75,7 @@ for (const plugin of plugins) {
     tools: toolRegistry,
     executors: executorRegistry,
     responses: responseChannels,
+    status: statusBus,
     prepare: preparerRegistry,
     log,
     paths: { stateDir, configDir },
@@ -113,7 +117,17 @@ const runner = new SessionRunner(
   preparerRegistry,
   executorId,
 );
-const execute: EventExecutor = (event) => runner.run(event);
+// Per-event handler: prepare the session (system prompt + tools + event) and hand it to the configured low-level session executor, then record the returned transcript as JSONL (in the XDG state dir) and log it.
+// Emit a busy transition on the status bus around the run (and idle in `finally`, so a throwing session still clears the indicator), so subscribed clients (the webui) show a working indicator for every event whatever its source.
+// See {@link SessionRunner} and {@link startRecording}.
+const execute: EventExecutor = async (event) => {
+  statusBus.notify("busy", event.source);
+  try {
+    await runner.run(event);
+  } finally {
+    statusBus.notify("idle", null);
+  }
+};
 
 // Graceful shutdown: closing the queue lets a pending pull reject so the main loop exits; then we stop accepting HTTP connections.
 let shuttingDown = false;

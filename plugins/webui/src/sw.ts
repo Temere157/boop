@@ -29,7 +29,7 @@ interface SwScope {
 const sw = self as unknown as SwScope;
 
 /** Cache store name; bump the suffix to invalidate a previous shell on activate. */
-const CACHE = "boop-webui-v1";
+const CACHE = "boop-webui-v2";
 
 /** The committed static shell to pre-cache on install so the app opens offline even before any navigation.
  * The icon PNGs are committed, so they are safe to pre-cache here. */

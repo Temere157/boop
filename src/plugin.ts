@@ -50,6 +50,25 @@ export interface ResponseChannels {
   unregister(id: string): void;
 }
 
+/**
+ * Whether the agent is currently handling an event.
+ * `busy` while the main loop is executing an event's session; `idle` when no event is being handled.
+ */
+export type SessionStatus = "busy" | "idle";
+
+/**
+ * Capability to observe the agent's global busy/idle status.
+ * The main loop emits a transition around every event it handles (`busy` on start, `idle` on finish — see the loop), so this is a global signal: it fires for every event whatever its source.
+ * A plugin that wants to mirror that state to its clients (a webui showing a working indicator) subscribes here; the listener receives the new status and, on `busy`, the event source string (a short name like `"webui"` or `"ingest"`), or `null` on `idle`.
+ * The source string — not the full event payload — is carried so one client's message text is never leaked to another client through this path.
+ * A new subscriber is called immediately with the current status, so a client that connects mid-processing gets the right state without waiting for the next transition.
+ */
+export interface StatusEvents {
+  subscribe(
+    listener: (status: SessionStatus, source: string | null) => void,
+  ): void;
+}
+
 /** A buffered HTTP request, with the body fully read into memory. */
 export interface HttpRequest {
   readonly method: string;
@@ -348,6 +367,8 @@ export interface PluginHost {
   readonly executors: Executors;
   /** Register/unregister response channels (the reply-side plugin boundary). */
   readonly responses: ResponseChannels;
+  /** Observe the agent's global busy/idle status (fires for every event, whatever its source). */
+  readonly status: StatusEvents;
   /** Register a session preparer to adjust a prepared session's messages before the executor runs. */
   readonly prepare: SessionPreparers;
   /** Obtain a scoped, level-filtered logger. */

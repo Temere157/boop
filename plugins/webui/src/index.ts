@@ -1,6 +1,7 @@
 // The webui entry.
 // Connects a WebSocket to `/ws`, renders incoming agent replies as bubbles in a centered #stream column, and sends the composer's text on submit.
-// The backend (`plugins/webui/index.ts`) enqueues a `webui` event per new tab (a `connect`) and per submitted message, and registers a response channel so the agent's `respond` tool writes back through the same socket — those replies arrive here as `onmessage`.
+// The backend (`plugins/webui/index.ts`) enqueues a `webui` event per new tab (a `connect`) and per submitted message, and registers a response channel so the agent's `respond` tool writes back through the same socket — those replies arrive here as `reply` frames in the `onmessage` envelope.
+// The same socket also carries `status` frames: global busy/idle transitions from the core, so this tab shows a working indicator whenever any event is being handled — not just the ones it triggered.
 // A reconnect (network blip, server restart) reuses the same per-tab instance id with `fresh:false` so it does not enqueue a fresh `connect`; only a new tab — a new instance id — does (see the hello frame sent in `connect`).
 //
 // Stays within erasable syntax (no enums, namespaces, or parameter properties) so the server's type-stripping pipeline serves it unchanged.
@@ -8,6 +9,7 @@
 const app = document.getElementById("app");
 const stream = document.getElementById("stream") as HTMLOListElement | null;
 const status = document.getElementById("status") as HTMLSpanElement | null;
+const working = document.getElementById("working") as HTMLSpanElement | null;
 const form = document.getElementById("composer") as HTMLFormElement | null;
 const input = document.getElementById("composer-input") as HTMLInputElement | null;
 const sendButton = document.getElementById("composer-send") as HTMLButtonElement | null;
@@ -73,6 +75,7 @@ const run = (
   _app: HTMLElement,
   stream: HTMLOListElement,
   status: HTMLSpanElement,
+  working: HTMLSpanElement,
   form: HTMLFormElement,
   input: HTMLInputElement,
   sendButton: HTMLButtonElement,
@@ -118,6 +121,16 @@ const run = (
     }
   }
 
+  /** Show or hide the working indicator; `source` (the event source on `busy`, `null` on `idle`) is surfaced in the title so the cross-source nature of the signal is visible. */
+  function setWorking(busy: boolean, source: string | null): void {
+    working.hidden = !busy;
+    working.title = busy
+      ? source === null
+        ? "working"
+        : `working: ${source}`
+      : "idle";
+  }
+
   form.addEventListener("submit", (event) => {
     event.preventDefault();
     const text = input.value.trim();
@@ -159,8 +172,28 @@ const run = (
     });
 
     socket.addEventListener("message", (event) => {
-      const text = typeof event.data === "string" ? event.data : "";
-      if (text !== "") addMessage("agent", text);
+      // Server frames are JSON envelopes keyed by `type`: `reply` carries an agent message rendered as a bubble, `status` carries a global busy/idle transition so this tab reflects the agent's overall state (including work triggered from other channels).
+      let frame: unknown;
+      try {
+        frame = JSON.parse(typeof event.data === "string" ? event.data : "");
+      } catch {
+        return;
+      }
+      if (typeof frame !== "object" || frame === null) return;
+      const f = frame as { type?: string };
+      if (f.type === "reply") {
+        const text = (frame as { text?: unknown }).text;
+        if (typeof text === "string" && text !== "") addMessage("agent", text);
+      } else if (f.type === "status") {
+        const status = (frame as { status?: unknown }).status;
+        const source = (frame as { source?: unknown }).source;
+        if (status === "busy" || status === "idle") {
+          setWorking(
+            status === "busy",
+            typeof source === "string" ? source : null,
+          );
+        }
+      }
     });
 
     const scheduleReconnect = (): void => {
@@ -199,9 +232,10 @@ if (
   app !== null &&
   stream !== null &&
   status !== null &&
+  working !== null &&
   form !== null &&
   input !== null &&
   sendButton !== null
 ) {
-  run(app, stream, status, form, input, sendButton);
+  run(app, stream, status, working, form, input, sendButton);
 }

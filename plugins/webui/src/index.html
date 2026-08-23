@@ -21,7 +21,10 @@
     <main id="app">
       <header id="header">
         <h1>boop</h1>
+        <!-- The connection dot; disconnected (red) when the WebSocket is down, connected (green) when it is up. -->
         <span id="status" class="disconnected" title="disconnected">●</span>
+        <!-- The working indicator; visible (with a spinner) while the agent is handling any event, hidden when idle. -->
+        <span id="working" class="idle" hidden title="idle"></span>
       </header>
       <ol id="stream" aria-live="polite"></ol>
       <footer id="composer-bar">
