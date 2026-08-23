@@ -23,10 +23,12 @@
         <!-- The boop logo, scaled to fit the header next to the title. -->
         <img id="logo" src="./icon-512-maskable.png" alt="" />
         <h1>boop</h1>
-        <!-- The connection dot; disconnected (red) when the WebSocket is down, connected (green) when it is up. -->
-        <span id="status" class="disconnected" title="disconnected">●</span>
-        <!-- The working indicator; visible (with a spinner) while the agent is handling any event, hidden when idle. -->
-        <span id="working" class="idle" hidden title="idle"></span>
+        <!-- The connection dot, which doubles as the working indicator: a single dot at rest that splits into three orbiting dots while the agent is working (spiral out → spin → spiral back in). Color encodes the WebSocket connection state (green connected, red disconnected). -->
+        <span id="status" class="disconnected" title="disconnected">
+          <span class="dot"></span>
+          <span class="dot"></span>
+          <span class="dot"></span>
+        </span>
       </header>
       <ol id="stream" aria-live="polite"></ol>
       <footer id="composer-bar">

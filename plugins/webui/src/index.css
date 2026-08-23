@@ -58,9 +58,71 @@ body {
   align-self: center;
 }
 
+/* The connection dot doubles as the working indicator: a single dot at rest (the three `.dot`s collapsed to the center) that splits into three orbiting dots while the agent is working.
+   The three dots sit within a 120° arc (one third of the circle) rather than evenly around it, so the spread reads as a tight cluster instead of a tripod.
+   `--r` is the dots' shared orbital radius and `--shrink` how much each dot shrinks as it spreads; both jump instantly on `.spread` (the split) and on its removal (the merge), and each `.dot`'s `transform` eases to its new radius and scale with a staggered `transition-delay` so the first dot reaches the outside first on the way out and the inside first on the way in.
+   The dots shrink smoothly as they spread out and stay small while they orbit, then grow back as they merge.
+   `.active` runs the spin so the cluster orbits; it stays through the merge and is cleared once the trailing dot's `transform` settles back at 0. */
+@property --r {
+  syntax: "<length>";
+  inherits: true;
+  initial-value: 0px;
+}
+
+@property --shrink {
+  syntax: "<number>";
+  inherits: true;
+  initial-value: 0;
+}
+
 #status {
-  font-size: 0.9rem;
-  line-height: 1;
+  position: relative;
+  width: 0.9rem;
+  height: 0.9rem;
+  align-self: center;
+  --r: 0px;
+  --shrink: 0;
+}
+
+#status.spread {
+  --r: 0.5rem;
+  --shrink: 0.4;
+}
+
+#status.active {
+  animation: status-spin 0.8s linear infinite;
+}
+
+#status .dot {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 0.5rem;
+  height: 0.5rem;
+  background: currentColor;
+  border-radius: 50%;
+  /* Center on the container, then offset radially by the dot's angle times the shared `--r`, and shrink by the shared `--shrink` so the dots shrink smoothly as they spread out and stay small while they orbit; the container's rotation (`.active`) turns the offsets into a spin. */
+  transform: translate(-50%, -50%) translate(calc(var(--ax) * var(--r)), calc(var(--ay) * var(--r))) scale(calc(1 - var(--shrink)));
+  /* Ease to the new radius and scale when `--r`/`--shrink` jump, with a per-dot delay (set below) that staggers the split and merge so the first dot leads. */
+  transition: transform 300ms ease;
+}
+
+#status .dot:nth-child(1) {
+  --ax: 0.5;
+  --ay: -0.866025;
+  transition-delay: 0ms;
+}
+
+#status .dot:nth-child(2) {
+  --ax: 1;
+  --ay: 0;
+  transition-delay: 80ms;
+}
+
+#status .dot:nth-child(3) {
+  --ax: 0.5;
+  --ay: 0.866025;
+  transition-delay: 160ms;
 }
 
 #status.connected {
@@ -71,21 +133,7 @@ body {
   color: #dc2626;
 }
 
-/* The working indicator: a small spinner shown while the agent is handling any event (whatever its source), hidden when idle. */
-#working {
-  width: 0.9rem;
-  height: 0.9rem;
-  border: 2px solid color-mix(in srgb, CanvasText 25%, Canvas);
-  border-top-color: var(--bubble-user);
-  border-radius: 50%;
-  animation: working-spin 0.8s linear infinite;
-}
-
-#working[hidden] {
-  display: none;
-}
-
-@keyframes working-spin {
+@keyframes status-spin {
   to {
     transform: rotate(360deg);
   }

@@ -9,7 +9,6 @@
 const app = document.getElementById("app");
 const stream = document.getElementById("stream") as HTMLOListElement | null;
 const status = document.getElementById("status") as HTMLSpanElement | null;
-const working = document.getElementById("working") as HTMLSpanElement | null;
 const form = document.getElementById("composer") as HTMLFormElement | null;
 const input = document.getElementById("composer-input") as HTMLInputElement | null;
 const sendButton = document.getElementById("composer-send") as HTMLButtonElement | null;
@@ -75,7 +74,6 @@ const run = (
   _app: HTMLElement,
   stream: HTMLOListElement,
   status: HTMLSpanElement,
-  working: HTMLSpanElement,
   form: HTMLFormElement,
   input: HTMLInputElement,
   sendButton: HTMLButtonElement,
@@ -107,28 +105,64 @@ const run = (
     }
   }
 
-  function setConnected(connected: boolean): void {
-    if (connected) {
-      status.className = "connected";
-      status.title = "connected";
-      input.disabled = false;
-      sendButton.disabled = false;
-    } else {
-      status.className = "disconnected";
-      status.title = "disconnected";
-      input.disabled = true;
-      sendButton.disabled = true;
-    }
+  // Connection and working state for the merged `#status` dot, so the title composes both signals and the working phase transitions survive a disconnect that recolors the dot mid-work.
+  let isConnected = false;
+  let isBusy = false;
+  let busySource: string | null = null;
+  // A pending `transitionend` remover for `.active` (set when the merge starts, cleared on interrupt or completion), so a re-spread mid-merge does not strand a spin-stopping callback.
+  let stopRemover: ((e: TransitionEvent) => void) | null = null;
+
+  /** Compose the dot's `title` from the current connection and working state so both signals stay legible regardless of which one last changed. */
+  function updateTitle(): void {
+    status.title = isBusy
+      ? busySource === null
+        ? "working"
+        : `working: ${busySource}`
+      : isConnected
+        ? "connected"
+        : "disconnected";
   }
 
-  /** Show or hide the working indicator; `source` (the event source on `busy`, `null` on `idle`) is surfaced in the title so the cross-source nature of the signal is visible. */
-  function setWorking(busy: boolean, source: string | null): void {
-    working.hidden = !busy;
-    working.title = busy
-      ? source === null
-        ? "working"
-        : `working: ${source}`
-      : "idle";
+  function setConnected(connected: boolean): void {
+    isConnected = connected;
+    // Toggle the connection class rather than overwriting `className`, so the working phase classes (`.active`/`.spread`) survive a recolor mid-work.
+    status.classList.toggle("connected", connected);
+    status.classList.toggle("disconnected", !connected);
+    updateTitle();
+    input.disabled = !connected;
+    sendButton.disabled = !connected;
+  }
+
+  /**
+   * Merge the working indicator into the connection dot: `.spread` transitions the dots' orbital radius out (a spiral, since `.active` is already spinning) and removing it spirals them back in; `.active` keeps the spin through the merge and is cleared once the radius settles at 0.
+   * `source` (on `busy`) is surfaced in the title so the cross-source nature of the signal is visible.
+   */
+  function setWorking(nowBusy: boolean, source: string | null): void {
+    isBusy = nowBusy;
+    if (nowBusy) {
+      busySource = source;
+      // Interrupt a merge in flight: drop its pending `stop` so `.active` survives the re-spread, and re-adding `.spread` transitions the radius back out from wherever it had reached.
+      if (stopRemover !== null) {
+        status.removeEventListener("transitionend", stopRemover);
+        stopRemover = null;
+      }
+      status.classList.add("active");
+      status.classList.add("spread");
+    } else if (status.classList.contains("spread")) {
+      // Only merge if we were actually spread; a stray `idle` while already idle is a no-op (and would otherwise strand a `stop` that no transition will fire).
+      status.classList.remove("spread");
+      const stop = (e: TransitionEvent): void => {
+        if (e.propertyName !== "transform") return;
+        // Only complete when the trailing dot (the one with the longest delay) settles, so `.active` is dropped exactly as the last dot reforms.
+        if (e.target !== status.lastElementChild) return;
+        status.classList.remove("active");
+        status.removeEventListener("transitionend", stop);
+        stopRemover = null;
+      };
+      stopRemover = stop;
+      status.addEventListener("transitionend", stop);
+    }
+    updateTitle();
   }
 
   form.addEventListener("submit", (event) => {
@@ -232,10 +266,9 @@ if (
   app !== null &&
   stream !== null &&
   status !== null &&
-  working !== null &&
   form !== null &&
   input !== null &&
   sendButton !== null
 ) {
-  run(app, stream, status, working, form, input, sendButton);
+  run(app, stream, status, form, input, sendButton);
 }
