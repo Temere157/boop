@@ -3,8 +3,3 @@ dist/
 *.tsbuildinfo
 .direnv/
 result
-# Generated webui PWA icons (produced from plugins/webui/src/icon.svg by `just webui-icons`).
-plugins/webui/src/icon-192.png
-plugins/webui/src/icon-512.png
-plugins/webui/src/icon-512-maskable.png
-plugins/webui/src/apple-touch-icon.png

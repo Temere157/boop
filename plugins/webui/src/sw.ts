@@ -32,14 +32,17 @@ const sw = self as unknown as SwScope;
 const CACHE = "boop-webui-v1";
 
 /** The committed static shell to pre-cache on install so the app opens offline even before any navigation.
- * Generated icons (the PNGs) are intentionally excluded: they may not exist yet (`just webui-icons` is a separate step), and `cache.addAll` rejects the whole batch if any entry fails. */
+ * The icon PNGs are committed, so they are safe to pre-cache here. */
 const SHELL = [
   "/ui/",
   "/ui/index.html",
   "/ui/index.css",
   "/ui/index.ts",
   "/ui/manifest.webmanifest",
-  "/ui/icon.svg",
+  "/ui/icon-192.png",
+  "/ui/icon-512.png",
+  "/ui/icon-512-maskable.png",
+  "/ui/apple-touch-icon.png",
 ];
 
 sw.addEventListener("install", (event) => {
