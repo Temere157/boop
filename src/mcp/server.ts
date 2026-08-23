@@ -42,20 +42,12 @@ class McpUnixSocket implements McpSocket {
 }
 
 /**
- * Core MCP server infrastructure. This is shared infrastructure, not a
- * plugin: it serves boop's registered tools to an agent runtime (e.g.
- * claude-code in -p mode, reached via a stdio-bridge shim launched as a
- * command-based MCP server) over the MCP stdio protocol on per-session unix
- * sockets. The server is created once at startup; each call to
- * {@link serve} binds a fresh socket for one session, so sessions never
- * share a listener. Tool dispatch goes through the {@link ToolInvocation}
- * the session carries, so handler crashes and unknown tools come back as a
- * semantic {@link ToolResult} (with `isError`) rather than dropping the
- * connection.
+ * Core MCP server infrastructure.
+ * This is shared infrastructure, not a plugin: it serves boop's registered tools to an agent runtime (e.g. claude-code in -p mode, reached via a stdio-bridge shim launched as a command-based MCP server) over the MCP stdio protocol on per-session unix sockets.
+ * The server is created once at startup; each call to {@link serve} binds a fresh socket for one session, so sessions never share a listener.
+ * Tool dispatch goes through the {@link ToolInvocation} the session carries, so handler crashes and unknown tools come back as a semantic {@link ToolResult} (with `isError`) rather than dropping the connection.
  *
- * The transport is unix sockets carrying newline-delimited JSON-RPC 2.0 —
- * the same framing the MCP stdio transport uses — so a shim that connects
- * a subprocess's stdin/stdout to the socket needs no protocol translation.
+ * The transport is unix sockets carrying newline-delimited JSON-RPC 2.0 — the same framing the MCP stdio transport uses — so a shim that connects a subprocess's stdin/stdout to the socket needs no protocol translation.
  */
 export class McpUnixServer implements McpServer {
   private readonly sockets: McpUnixSocket[] = [];
@@ -155,8 +147,7 @@ export class McpUnixServer implements McpServer {
           const args =
             (params?.arguments as Record<string, unknown> | undefined) ??
             {};
-          // Tool errors are a result (isError), not a JSON-RPC error — the
-          // ToolInvocation wrapper already converts crashes/unknown tools.
+          // Tool errors are a result (isError), not a JSON-RPC error — the ToolInvocation wrapper already converts crashes/unknown tools.
           const toolResult = await tools.call(name, args);
           result = toMcpCallResult(toolResult);
           break;

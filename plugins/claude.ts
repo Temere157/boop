@@ -12,14 +12,10 @@ import type {
 } from "@boop/plugin";
 
 /**
- * A stdio-bridge shim, written to each session's tempdir and launched by
- * claude as a command-based MCP server. It connects to the unix socket at
- * `$BOOP_MCP_SOCKET` and pipes stdin ↔ stdout through it, so claude's MCP
- * stdio client ends up talking to boop's in-process MCP server over the
- * socket — with no out-of-process hop back into boop.
+ * A stdio-bridge shim, written to each session's tempdir and launched by claude as a command-based MCP server.
+ * It connects to the unix socket at `$BOOP_MCP_SOCKET` and pipes stdin ↔ stdout through it, so claude's MCP stdio client ends up talking to boop's in-process MCP server over the socket — with no out-of-process hop back into boop.
  *
- * It is a standalone `.mjs` (no imports from boop) because it runs in its
- * own node process, spawned by claude.
+ * It is a standalone `.mjs` (no imports from boop) because it runs in its own node process, spawned by claude.
  */
 const SHIM = `#!/usr/bin/env node
 import { connect } from "node:net";
@@ -42,19 +38,11 @@ sock.on("end", () => process.exit(0));
 `;
 
 /**
- * A builtin session executor that runs `claude` in `--print` (non-interactive)
- * mode as the agentic runtime, with boop's tools exposed over MCP via a
- * per-session unix socket.
+ * A builtin session executor that runs `claude` in `--print` (non-interactive) mode as the agentic runtime, with boop's tools exposed over MCP via a per-session unix socket.
  *
- * The flow: bind a fresh MCP socket serving the session's tools, write the
- * stdio-bridge shim into a tempdir, spawn `claude` there with an MCP config
- * pointing at the shim (so claude's tool calls route back through the socket
- * to boop's in-process handlers), then parse `--output-format stream-json`'s
- * NDJSON stdout into a full transcript of the agentic loop (assistant turns,
- * tool calls, tool results), and tear down the socket and tempdir.
+ * The flow: bind a fresh MCP socket serving the session's tools, write the stdio-bridge shim into a tempdir, spawn `claude` there with an MCP config pointing at the shim (so claude's tool calls route back through the socket to boop's in-process handlers), then parse `--output-format stream-json`'s NDJSON stdout into a full transcript of the agentic loop (assistant turns, tool calls, tool results), and tear down the socket and tempdir.
  *
- * The plugin depends only on the {@link Plugin} contract, not on any core
- * implementation, so it could be moved to an external package as-is.
+ * The plugin depends only on the {@link Plugin} contract, not on any core implementation, so it could be moved to an external package as-is.
  */
 export const claudeExecutorPlugin: Plugin = {
   name: "claude-executor",
@@ -89,9 +77,8 @@ const run = async (
       cwd: dir,
       mcpConfigJson,
       systemPrompt: session.systemPrompt,
-      // claude `--print` takes a single prompt; merge the prepared user/
-      // assistant turns into one. Today the seed is a single user message,
-      // but preparers may add context user messages, so join all of them.
+      // claude `--print` takes a single prompt; merge the prepared user/assistant turns into one.
+      // Today the seed is a single user message, but preparers may add context user messages, so join all of them.
       message: session.messages.map((m) => m.content).join("\n\n"),
       socketPath: socket.path,
       claude,
@@ -124,21 +111,17 @@ const run = async (
 };
 
 /**
- * Parses claude's `--output-format stream-json` stdout (NDJSON) into
- * transcript entries. Each line is one object:
+ * Parses claude's `--output-format stream-json` stdout (NDJSON) into transcript entries.
+ * Each line is one object:
  *
- * - `{"type":"system","subtype":"init",...}` — session init; logged, not
- *   an entry (boop already records the system prompt and first user turn).
- * - `{"type":"assistant","message":{...}}` — an assistant turn; content
- *   blocks map to text, thinking, and tool calls. Turns with none of
- *   these (models that emit no thinking summary) are skipped.
- * - `{"type":"user","message":{...}}` — a tool-result turn; each
- *   `tool_result` block becomes a `tool` entry.
- * - `{"type":"result",...}` — the final summary; logged (cost/usage). Its
- *   `result` text is not an entry: it restates the last assistant turn.
+ * - `{"type":"system","subtype":"init",...}` — session init; logged, not an entry (boop already records the system prompt and first user turn).
+ * - `{"type":"assistant","message":{...}}` — an assistant turn; content blocks map to text, thinking, and tool calls.
+ *   Turns with none of these (models that emit no thinking summary) are skipped.
+ * - `{"type":"user","message":{...}}` — a tool-result turn; each `tool_result` block becomes a `tool` entry.
+ * - `{"type":"result",...}` — the final summary; logged (cost/usage).
+ *   Its `result` text is not an entry: it restates the last assistant turn.
  *
- * Unparseable lines and unknown types are skipped (logged at debug) so a
- * format change degrades the transcript rather than crashing the session.
+ * Unparseable lines and unknown types are skipped (logged at debug) so a format change degrades the transcript rather than crashing the session.
  */
 function parseStreamJson(stdout: string, claude: Logger): TranscriptEntry[] {
   const entries: TranscriptEntry[] = [];
@@ -175,8 +158,7 @@ function parseStreamJson(stdout: string, claude: Logger): TranscriptEntry[] {
             });
           }
         }
-        // Some models emit no thinking summary, leaving turns with no
-        // text, thinking, or tool calls — skip those empty entries.
+        // Some models emit no thinking summary, leaving turns with no text, thinking, or tool calls — skip those empty entries.
         if (text.length === 0 && thinking.length === 0 && toolCalls.length === 0) {
           break;
         }
@@ -235,9 +217,7 @@ interface ClaudeResult {
 
 /**
  * Spawns `claude --print` with the given MCP config and captures its output.
- * The MCP config points at a stdio server (the shim) that bridges to boop's
- * socket, so tool calls during the session route back through boop's
- * in-process MCP server.
+ * The MCP config points at a stdio server (the shim) that bridges to boop's socket, so tool calls during the session route back through boop's in-process MCP server.
  */
 function runClaude(opts: {
   cwd: string;
@@ -261,30 +241,24 @@ function runClaude(opts: {
       resolve(result);
     };
     const args = [
-      // Isolate from the user's own claude config without `--safe-mode`,
-      // which disables MCP servers entirely; an empty `--setting-sources`
-      // loads nothing from the user's config dirs while still honoring
-      // `--mcp-config`.
+      // Isolate from the user's own claude config without `--safe-mode`, which disables MCP servers entirely; an empty `--setting-sources` loads nothing from the user's config dirs while still honoring `--mcp-config`.
       "--setting-sources",
       "",
       "--no-session-persistence",
       "--mcp-config",
       opts.mcpConfigJson,
       "--strict-mcp-config",
-      // Pre-approve every tool from the `boop` MCP server. In `--print`
-      // mode there is no interactive prompt to grant permission, so without
-      // this claude reports the tool as needing approval and never calls
-      // it. MCP tools are named `mcp__<server>__<tool>`.
+      // Pre-approve every tool from the `boop` MCP server.
+      // In `--print` mode there is no interactive prompt to grant permission, so without this claude reports the tool as needing approval and never calls it.
+      // MCP tools are named `mcp__<server>__<tool>`.
       "--allowedTools",
       "mcp__boop__*",
       "--tools",
       "",
       "--system-prompt",
       opts.systemPrompt,
-      // Stream the full transcript as NDJSON (one JSON object per line:
-      // init, assistant turns, tool-result user turns, final result) so
-      // boop's transcript reflects the whole agentic loop, not just the
-      // final text. `--verbose` is required with `--print` for stream-json.
+      // Stream the full transcript as NDJSON (one JSON object per line: init, assistant turns, tool-result user turns, final result) so boop's transcript reflects the whole agentic loop, not just the final text.
+      // `--verbose` is required with `--print` for stream-json.
       "--output-format",
       "stream-json",
       "--verbose",
@@ -294,8 +268,7 @@ function runClaude(opts: {
     claude.debug("spawn", "claude " + args.map((a) => JSON.stringify(a)).join(" "));
     const child = spawn("claude", args, {
       cwd: opts.cwd,
-      // `--print` takes the prompt as an arg, not stdin; ignore stdin so
-      // claude doesn't wait 3s for piped data it will never read.
+      // `--print` takes the prompt as an arg, not stdin; ignore stdin so claude doesn't wait 3s for piped data it will never read.
       stdio: ["ignore", "pipe", "pipe"],
       env: { ...process.env, BOOP_MCP_SOCKET: opts.socketPath },
     });

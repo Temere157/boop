@@ -22,10 +22,8 @@
           ];
         };
 
-        # `nix flake check` runs `tsc --noEmit` against the sources using
-        # dependencies resolved from package-lock.json via importNpmLock.
-        # No hash is specified here: importNpmLock relies on the integrity
-        # hashes already present in package-lock.json.
+        # `nix flake check` runs `tsc --noEmit` against the sources using dependencies resolved from package-lock.json via importNpmLock.
+        # No hash is specified here: importNpmLock relies on the integrity hashes already present in package-lock.json.
         checks.typecheck = pkgs.buildNpmPackage {
           pname = "boop";
           version = "0.1.0";
@@ -50,10 +48,8 @@
           '';
         };
 
-        # Same shape as `typecheck`, but runs `tsc -p plugins` against the
-        # `plugins/` project — the erasable-syntax-only, directly-loaded
-        # plugins (see plugins/tsconfig.json). `noEmit` lives in the config
-        # because `tsc -p` cannot be combined with `--noEmit`.
+        # Same shape as `typecheck`, but runs `tsc -p plugins` against the `plugins/` project — the erasable-syntax-only, directly-loaded plugins (see plugins/tsconfig.json).
+        # `noEmit` lives in the config because `tsc -p` cannot be combined with `--noEmit`.
         checks.typecheck-plugins = pkgs.buildNpmPackage {
           pname = "boop";
           version = "0.1.0";
@@ -78,12 +74,8 @@
           '';
         };
 
-        # Same shape as `typecheck-plugins`, but runs `tsc -p plugins/webui`
-        # against the browser-side webui sources — the DOM-lib,
-        # no-`@types/node` project under `plugins/webui/` (see
-        # plugins/webui/tsconfig.json). Browser code is separate from the
-        # server entry so it can use `document` (DOM lib) without the
-        # node-only `plugins/tsconfig.json` rejecting it.
+        # Same shape as `typecheck-plugins`, but runs `tsc -p plugins/webui` against the browser-side webui sources — the DOM-lib, no-`@types/node` project under `plugins/webui/` (see plugins/webui/tsconfig.json).
+        # Browser code is separate from the server entry so it can use `document` (DOM lib) without the node-only `plugins/tsconfig.json` rejecting it.
         checks.typecheck-webui = pkgs.buildNpmPackage {
           pname = "boop";
           version = "0.1.0";

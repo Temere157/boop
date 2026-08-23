@@ -6,27 +6,15 @@ import type {
 } from "./plugin.js";
 
 /**
- * The core response-channel registry. This is shared infrastructure, not a
- * plugin: it holds the set of currently-open {@link ResponseChannel}s that
- * providers have registered — the reply paths the agent can send on right
- * now. A channel is in the registry only while its owner is willing to
- * deliver (an HTTP ingest request held open for ≤20s, an eternal SMS
- * gateway, a live webui connection, …); the owner unregisters it the
- * moment it stops being willing.
+ * The core response-channel registry.
+ * This is shared infrastructure, not a plugin: it holds the set of currently-open {@link ResponseChannel}s that providers have registered — the reply paths the agent can send on right now.
+ * A channel is in the registry only while its owner is willing to deliver (an HTTP ingest request held open for ≤20s, an eternal SMS gateway, a live webui connection, …); the owner unregisters it the moment it stops being willing.
  *
- * Channels are independent of events. An event may reference a channel by
- * id (carried in its payload), but the registry does not tie a channel's
- * lifetime to any event: a channel is registered and unregistered by
- * whatever owns the reply path, not by the session loop. So an eternal
- * channel lives for the process lifetime, a webui channel lives for a
- * connection, and an HTTP ingest channel lives for a single held request
- * — all just entries here while open.
+ * Channels are independent of events.
+ * An event may reference a channel by id (carried in its payload), but the registry does not tie a channel's lifetime to any event: a channel is registered and unregistered by whatever owns the reply path, not by the session loop.
+ * So an eternal channel lives for the process lifetime, a webui channel lives for a connection, and an HTTP ingest channel lives for a single held request — all just entries here while open.
  *
- * The core's `respond` tool looks a channel up by id at call time (see
- * {@link registerRespondTool}), so a channel that closed between session
- * preparation and a `respond` call surfaces as a semantic `isError` result
- * rather than a silent drop — matching how the tool-invocation wrapper
- * treats crashes and unknown tools.
+ * The core's `respond` tool looks a channel up by id at call time (see {@link registerRespondTool}), so a channel that closed between session preparation and a `respond` call surfaces as a semantic `isError` result rather than a silent drop — matching how the tool-invocation wrapper treats crashes and unknown tools.
  */
 export class ResponseChannelRegistry implements ResponseChannels {
   private channels: Map<string, ResponseChannel> = new Map();
@@ -48,9 +36,8 @@ export class ResponseChannelRegistry implements ResponseChannels {
   }
 
   /**
-   * Snapshot of every open channel, for the session message. Taken at
-   * `prepare()` time as a hint to the agent; the `respond` tool queries
-   * live, so a channel listed here may already be gone by call time.
+   * Snapshot of every open channel, for the session message.
+   * Taken at `prepare()` time as a hint to the agent; the `respond` tool queries live, so a channel listed here may already be gone by call time.
    */
   get all(): readonly ResponseChannel[] {
     return [...this.channels.values()];
@@ -58,16 +45,11 @@ export class ResponseChannelRegistry implements ResponseChannels {
 }
 
 /**
- * Registers the core `respond` tool against the given registries. This is
- * core, not a plugin: the plugin boundary for replies is the channels
- * themselves (a provider registers the channels it can deliver on); the
- * one tool that sends on whatever id the agent picks is a core concept.
+ * Registers the core `respond` tool against the given registries.
+ * This is core, not a plugin: the plugin boundary for replies is the channels themselves (a provider registers the channels it can deliver on); the one tool that sends on whatever id the agent picks is a core concept.
  *
- * The tool takes a channel id (the open ids are listed in the session
- * message) and a message. A missing id, a closed channel, or a rejected
- * delivery comes back as an `isError` {@link ToolResult} so the executor's
- * agentic loop keeps going — the same convention the tool-invocation
- * wrapper uses for crashes and unknown tools.
+ * The tool takes a channel id (the open ids are listed in the session message) and a message.
+ * A missing id, a closed channel, or a rejected delivery comes back as an `isError` {@link ToolResult} so the executor's agentic loop keeps going — the same convention the tool-invocation wrapper uses for crashes and unknown tools.
  *
  * Tool: `respond`
  *   args : { channel: string, message: string }
@@ -81,11 +63,9 @@ export function registerRespondTool(
     {
       name: "respond",
       description:
-        "Send a message back to the user on a response channel. Open " +
-        "channel ids are listed in the event message; each is open only " +
-        "while its owner is willing to deliver, so a channel may close " +
-        "before you send — that returns an error. Pick the channel that " +
-        "matches where the reply should go (its description says what it is).",
+        "Send a message back to the user on a response channel. " +
+        "Open channel ids are listed in the event message; each is open only while its owner is willing to deliver, so a channel may close before you send — that returns an error. " +
+        "Pick the channel that matches where the reply should go (its description says what it is).",
       inputSchema: {
         type: "object",
         properties: {

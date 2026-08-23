@@ -14,9 +14,8 @@ const LOG_LEVELS: ReadonlySet<LogLevel> = new Set([
 ]);
 
 /**
- * Boop's config, loaded once at startup: a small JSON file with optional
- * keys (unknown keys ignored), read from {@link configPath}. A missing file
- * is the empty config (all defaults); a malformed file fails startup.
+ * Boop's config, loaded once at startup: a small JSON file with optional keys (unknown keys ignored), read from {@link configPath}.
+ * A missing file is the empty config (all defaults); a malformed file fails startup.
  */
 export interface BoopConfig {
   /** Id of the session executor to run each event's session. */
@@ -31,18 +30,14 @@ export interface BoopConfig {
 }
 
 /**
- * The config file path: `$XDG_CONFIG_HOME/boop/config.json`, falling back
- * to `~/.config/boop/config.json` (per the XDG Base Directory spec),
- * mirroring the state dir session recordings live in (see
- * {@link startRecording}).
+ * The config file path: `$XDG_CONFIG_HOME/boop/config.json`, falling back to `~/.config/boop/config.json` (per the XDG Base Directory spec), mirroring the state dir session recordings live in (see {@link startRecording}).
  */
 export function configPath(): string {
   return join(boopConfigDir(), "config.json");
 }
 
 /**
- * Loads boop's config from {@link configPath} and merges it with
- * environment variable overrides.
+ * Loads boop's config from {@link configPath} and merges it with environment variable overrides.
  *
  * Environment variables:
  * - `BOOP_EXECUTOR`: overrides `executor`
@@ -57,9 +52,8 @@ export function configPath(): string {
  */
 export function loadConfig(): BoopConfig {
   const path = configPath();
-  // Read the file if present; a missing file is fine (all defaults, env
-  // still applies below). Anything else — a read error or malformed JSON —
-  // fails startup naming the path.
+  // Read the file if present; a missing file is fine (all defaults, env still applies below).
+  // Anything else — a read error or malformed JSON — fails startup naming the path.
   let config: Record<string, unknown> = {};
   try {
     const raw = readFileSync(path, "utf8");

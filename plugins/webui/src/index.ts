@@ -1,12 +1,8 @@
-// The webui entry. Connects a WebSocket to `/ws`, renders incoming agent
-// replies as bubbles in a centered #stream column, and sends the composer's
-// text on submit. The backend (`plugins/webui/index.ts`) enqueues a
-// `webui` event per connection and per submitted message and registers a
-// response channel so the agent's `respond` tool writes back through the
-// same socket — those replies arrive here as `onmessage`.
+// The webui entry.
+// Connects a WebSocket to `/ws`, renders incoming agent replies as bubbles in a centered #stream column, and sends the composer's text on submit.
+// The backend (`plugins/webui/index.ts`) enqueues a `webui` event per connection and per submitted message and registers a response channel so the agent's `respond` tool writes back through the same socket — those replies arrive here as `onmessage`.
 //
-// Stays within erasable syntax (no enums, namespaces, or parameter
-// properties) so the server's type-stripping pipeline serves it unchanged.
+// Stays within erasable syntax (no enums, namespaces, or parameter properties) so the server's type-stripping pipeline serves it unchanged.
 
 const app = document.getElementById("app");
 const stream = document.getElementById("stream") as HTMLOListElement | null;
@@ -75,8 +71,8 @@ function run(
     input.value = "";
   });
 
-  // Reconnect with simple linear backoff capped at ~10s. The first attempt
-  // is immediate so a page load hits `/ws` right away.
+  // Reconnect with simple linear backoff capped at ~10s.
+  // The first attempt is immediate so a page load hits `/ws` right away.
   let ws: WebSocket | null = null;
   let backoff = 1000;
   let timer: ReturnType<typeof setTimeout> | null = null;

@@ -58,8 +58,7 @@ body {
   color: #dc2626;
 }
 
-/* The message stream fills the space between header and composer, scrolling
- * on overflow and sticking to the bottom when at the latest message. */
+/* The message stream fills the space between header and composer, scrolling on overflow and sticking to the bottom when at the latest message. */
 #stream {
   flex: 1 1 auto;
   min-height: 0;

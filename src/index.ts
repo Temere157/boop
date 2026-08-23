@@ -32,8 +32,7 @@ const executorRegistry = new ExecutorRegistry();
 const mcpServer = new McpUnixServer("boop", "0.1.0");
 const responseChannels = new ResponseChannelRegistry();
 const preparerRegistry = new PreparerRegistry();
-// The `respond` tool is core (the plugin boundary is the channels, not the
-// tool), so it is registered here rather than by a plugin.
+// The `respond` tool is core (the plugin boundary is the channels, not the tool), so it is registered here rather than by a plugin.
 registerRespondTool(toolRegistry, responseChannels);
 
 // Adapter from the internal EventQueue to the plugin-facing EventSink.
@@ -52,20 +51,16 @@ const eventSink: EventSink = {
   },
 };
 
-// Per-plugin directory bases: `{boopStateDir}/plugins/{name}/` for state
-// and `{boopConfigDir}/plugins/{name}/` for config, scoped by plugin name.
+// Per-plugin directory bases: `{boopStateDir}/plugins/{name}/` for state and `{boopConfigDir}/plugins/{name}/` for config, scoped by plugin name.
 const pluginsStateDir = join(boopStateDir(), "plugins");
 const pluginsConfigDir = join(boopConfigDir(), "plugins");
 
-// Plugin directories scanned at startup, in order. For now just the core
-// plugins shipped in `plugins/`, resolved relative to this module so it
-// works whether this runs from `src/` under tsx or `dist/` compiled.
+// Plugin directories scanned at startup, in order.
+// For now just the core plugins shipped in `plugins/`, resolved relative to this module so it works whether this runs from `src/` under tsx or `dist/` compiled.
 const pluginDirs = [fileURLToPath(new URL("../plugins/", import.meta.url))];
 const plugins = await loadPlugins(pluginDirs);
-// Each plugin depends only on the Plugin contract, so any of these could
-// be extracted into its own package without changes. Each gets its own
-// `paths.stateDir` and `paths.configDir` (created before init) so a plugin
-// can keep state and read its own config without colliding with another.
+// Each plugin depends only on the Plugin contract, so any of these could be extracted into its own package without changes.
+// Each gets its own `paths.stateDir` and `paths.configDir` (created before init) so a plugin can keep state and read its own config without colliding with another.
 for (const plugin of plugins) {
   const stateDir = join(pluginsStateDir, plugin.name);
   const configDir = join(pluginsConfigDir, plugin.name);
@@ -87,12 +82,8 @@ for (const plugin of plugins) {
 await httpServer.listen(port, host);
 log("http").info("listening", `http://${host}:${port}`);
 
-// Exactly one executor runs each event's session; the id is resolved at
-// startup: BOOP_EXECUTOR overrides the config file's `executor` key, and
-// with no override the sole registered executor is used. Several
-// registered executors is a configuration error (the core can't guess
-// which agentic loop to own); none is not — the session runner warns and
-// skips events until one is registered.
+// Exactly one executor runs each event's session; the id is resolved at startup: BOOP_EXECUTOR overrides the config file's `executor` key, and with no override the sole registered executor is used.
+// Several registered executors is a configuration error (the core can't guess which agentic loop to own); none is not — the session runner warns and skips events until one is registered.
 const executorIds = executorRegistry.ids();
 const requested = config.executor;
 let executorId: string | undefined;
@@ -112,9 +103,7 @@ if (requested !== undefined) {
 }
 log("core").info("executor", { id: executorId ?? null, available: executorIds });
 
-// Per-event handler: prepare the session (system prompt + tools + event)
-// and hand it to the configured low-level session executor, then record
-// the returned transcript as JSONL (in the XDG state dir) and log it.
+// Per-event handler: prepare the session (system prompt + tools + event) and hand it to the configured low-level session executor, then record the returned transcript as JSONL (in the XDG state dir) and log it.
 // See {@link SessionRunner} and {@link startRecording}.
 const runner = new SessionRunner(
   toolRegistry,
@@ -126,8 +115,7 @@ const runner = new SessionRunner(
 );
 const execute: EventExecutor = (event) => runner.run(event);
 
-// Graceful shutdown: closing the queue lets a pending pull reject so the
-// main loop exits; then we stop accepting HTTP connections.
+// Graceful shutdown: closing the queue lets a pending pull reject so the main loop exits; then we stop accepting HTTP connections.
 let shuttingDown = false;
 const stop = (signal: string): void => {
   if (shuttingDown) return;

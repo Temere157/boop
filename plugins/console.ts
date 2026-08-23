@@ -1,13 +1,10 @@
 import type { Plugin, ToolResult } from "@boop/plugin";
 
 /**
- * A builtin console plugin. It registers a single tool — `log` — that lets
- * the agent write a message to the console (stdout) during a session, and
- * returns the logged text back as an MCP-shaped result so the executor (and
- * the LLM) can see what was written.
+ * A builtin console plugin.
+ * It registers a single tool — `log` — that lets the agent write a message to the console (stdout) during a session, and returns the logged text back as an MCP-shaped result so the executor (and the LLM) can see what was written.
  *
- * The plugin depends only on the {@link Plugin} contract, not on any core
- * implementation, so it could be moved to an external package as-is.
+ * The plugin depends only on the {@link Plugin} contract, not on any core implementation, so it could be moved to an external package as-is.
  *
  * Tool: `log`
  *   args : { message: string }

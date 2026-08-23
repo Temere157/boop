@@ -3,20 +3,16 @@ import type { Logger, LogLevel } from "./plugin.js";
 /**
  * A tiny zero-dependency logger: level-filtered, scoped, writing to stderr.
  *
- * The threshold is read once from `BOOP_LOG` at module load (default
- * `info`); anything at or above it is written, anything below is dropped.
- * Levels are `trace` < `debug` < `info` < `warn` < `error`, plus `silent`
- * to suppress everything. Unknown values fall back to `info`.
+ * The threshold is read once from `BOOP_LOG` at module load (default `info`); anything at or above it is written, anything below is dropped.
+ * Levels are `trace` < `debug` < `info` < `warn` < `error`, plus `silent` to suppress everything.
+ * Unknown values fall back to `info`.
  *
  * Each call produces a single line of the form
  *   `<iso-date> <level> <scope> <msg> <args...>`
- * where non-string args are JSON-serialised. The scope gives the
- * per-subsystem prefix (`mcp`, `claude`, `http`, …) that grep expects,
- * without callers hand-formatting it.
+ * where non-string args are JSON-serialised.
+ * The scope gives the per-subsystem prefix (`mcp`, `claude`, `http`, …) that grep expects, without callers hand-formatting it.
  *
- * Output goes to stderr so it never collides with anything on stdout
- * (e.g. a future transcript dump) and so logs stay out of the way when
- * boop's output is piped.
+ * Output goes to stderr so it never collides with anything on stdout (e.g. a future transcript dump) and so logs stay out of the way when boop's output is piped.
  */
 
 export type { LogLevel } from "./plugin.js";
@@ -54,7 +50,8 @@ function format(
 }
 
 /**
- * Creates a scoped logger. Call once per subsystem and reuse:
+ * Creates a scoped logger.
+ * Call once per subsystem and reuse:
  *
  * ```ts
  * import { log } from "./log.js";

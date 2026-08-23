@@ -29,15 +29,11 @@ interface Upgrade {
 }
 
 /**
- * The core HTTP server. This is shared infrastructure, not a plugin: many
- * plugins need to register webhook endpoints, so the server lives in core
- * and plugins register routes on it via {@link HttpRoutes}.
+ * The core HTTP server.
+ * This is shared infrastructure, not a plugin: many plugins need to register webhook endpoints, so the server lives in core and plugins register routes on it via {@link HttpRoutes}.
  *
- * The server buffers each request fully, hands a plain {@link HttpRequest}
- * to the matched route handler, and writes the returned {@link HttpResponse}
- * back out. Routing is exact method + pathname match (query strings are
- * ignored) — enough for webhook-style endpoints; richer routing can come
- * later without changing the plugin contract.
+ * The server buffers each request fully, hands a plain {@link HttpRequest} to the matched route handler, and writes the returned {@link HttpResponse} back out.
+ * Routing is exact method + pathname match (query strings are ignored) — enough for webhook-style endpoints; richer routing can come later without changing the plugin contract.
  */
 export class HttpServer implements HttpRoutes {
   private routes: Route[] = [];
@@ -49,9 +45,7 @@ export class HttpServer implements HttpRoutes {
   }
 
   upgrade(path: string, handler: UpgradeHandler): void {
-    // Replace any existing handler at the same path; there is no reload
-    // path today, but keeping the last registration wins avoids silent
-    // duplicates.
+    // Replace any existing handler at the same path; there is no reload path today, but keeping the last registration wins avoids silent duplicates.
     this.upgrades = this.upgrades.filter((u) => u.path !== path);
     this.upgrades.push({ path, handler });
   }
@@ -86,13 +80,10 @@ export class HttpServer implements HttpRoutes {
   }
 
   /**
-   * Dispatch an `upgrade` request to the matching path's handler, or
-   * destroy the socket if none matches. Errors thrown by a handler are
-   * logged and the socket is destroyed rather than left dangling.
+   * Dispatch an `upgrade` request to the matching path's handler, or destroy the socket if none matches.
+   * Errors thrown by a handler are logged and the socket is destroyed rather than left dangling.
    *
-   * Node types the upgrade event's socket as `Duplex`; at runtime it is a
-   * real `net.Socket` (an HTTP server only upgrades TCP sockets), so it is
-   * safe to hand to {@link UpgradeHandler}s as a `Socket`.
+   * Node types the upgrade event's socket as `Duplex`; at runtime it is a real `net.Socket` (an HTTP server only upgrades TCP sockets), so it is safe to hand to {@link UpgradeHandler}s as a `Socket`.
    */
   private async handleUpgrade(
     req: IncomingMessage,

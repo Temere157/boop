@@ -6,19 +6,13 @@ import type {
 } from "./plugin.js";
 
 /**
- * The core tool registry. This is shared infrastructure, not a plugin: many
- * plugins register tools (call an API, read a file, send a message, …) and
- * they all surface to the same place — the event executor, which hands them
- * to the LLM when a session runs. Plugins register tools via
- * {@link Tools}; the registry holds them until the executor consumes them.
+ * The core tool registry.
+ * This is shared infrastructure, not a plugin: many plugins register tools (call an API, read a file, send a message, …) and they all surface to the same place — the event executor, which hands them to the LLM when a session runs.
+ * Plugins register tools via {@link Tools}; the registry holds them until the executor consumes them.
  *
- * Tool definitions are MCP-shaped (see {@link ToolDefinition}) so an
- * executor that exposes them over MCP (e.g. an MCP server bridge) can pass
- * them through unchanged, and the description the LLM sees is exactly what
- * an MCP client would see.
+ * Tool definitions are MCP-shaped (see {@link ToolDefinition}) so an executor that exposes them over MCP (e.g. an MCP server bridge) can pass them through unchanged, and the description the LLM sees is exactly what an MCP client would see.
  *
- * Duplicate tool names are rejected on registration; a tool is identified by
- * its name alone, so two plugins must not register the same name.
+ * Duplicate tool names are rejected on registration; a tool is identified by its name alone, so two plugins must not register the same name.
  */
 export class ToolRegistry implements Tools {
   private tools: RegisteredTool[] = [];

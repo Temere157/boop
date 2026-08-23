@@ -12,30 +12,15 @@ import type {
 } from "@boop/plugin";
 
 /**
- * A builtin session executor that owns its own agentic loop — the LLM ↔
- * tool-call cycle — against any OpenAI-compatible Chat Completions endpoint,
- * talking the HTTP API directly with Node's global `fetch` and dispatching
- * tool calls in-process through the session's {@link ToolInvocation}.
+ * A builtin session executor that owns its own agentic loop — the LLM ↔ tool-call cycle — against any OpenAI-compatible Chat Completions endpoint, talking the HTTP API directly with Node's global `fetch` and dispatching tool calls in-process through the session's {@link ToolInvocation}.
  *
- * Unlike the `claude` executor, which shells out to the `claude` CLI and lets
- * *it* own the loop, this one is self-contained: it builds the OpenAI
- * message list from the prepared session, posts to
- * `{baseUrl}/chat/completions`, feeds assistant tool calls straight back
- * into `session.tools.call`, and returns a transcript in the same shape as
- * `claude`'s so recordings are uniform. It never asks {@link PreparedSession.mcp}
- * for a socket — the opt-in MCP path is genuinely optional, and this is the
- * proof.
+ * Unlike the `claude` executor, which shells out to the `claude` CLI and lets *it* own the loop, this one is self-contained: it builds the OpenAI message list from the prepared session, posts to `{baseUrl}/chat/completions`, feeds assistant tool calls straight back into `session.tools.call`, and returns a transcript in the same shape as `claude`'s so recordings are uniform.
+ * It never asks {@link PreparedSession.mcp} for a socket — the opt-in MCP path is genuinely optional, and this is the proof.
  *
- * The executor reads its own config from its per-plugin config dir
- * (`{boopConfigDir}/plugins/openai-executor/config.json`), separate from
- * boop's `config.json`, so model/endpoint settings live next to the thing
- * they configure. `baseUrl` and `model` have no defaults and must be set
- * (in the file or via `BOOP_OPENAI_*` env); the API key is read from env
- * (never stored in the file), and can be skipped for a local no-auth server
- * with `"apiKeyEnv": null`.
+ * The executor reads its own config from its per-plugin config dir (`{boopConfigDir}/plugins/openai-executor/config.json`), separate from boop's `config.json`, so model/endpoint settings live next to the thing they configure.
+ * `baseUrl` and `model` have no defaults and must be set (in the file or via `BOOP_OPENAI_*` env); the API key is read from env (never stored in the file), and can be skipped for a local no-auth server with `"apiKeyEnv": null`.
  *
- * The plugin depends only on the {@link Plugin} contract, not on any core
- * implementation, so it could be moved to an external package as-is.
+ * The plugin depends only on the {@link Plugin} contract, not on any core implementation, so it could be moved to an external package as-is.
  */
 export const openaiExecutorPlugin: Plugin = {
   name: "openai-executor",
@@ -61,14 +46,8 @@ interface OpenaiConfig {
   /** Bearer token, or `null` to skip the `Authorization` header (no-auth server). */
   readonly apiKey: string | null;
   /**
-   * `max_tokens` sent on every request; bounds each turn's generation. A
-   * finite default (8192) is what stops a server from looping forever when
-   * a model gets stuck emitting empty `...` think-tag pairs — the loop
-   * emits only the tag tokens, which still count toward `max_tokens`, so
-   * the cap fires and the server returns `finish_reason: "length"` instead
-   * of running unbounded (the reasoning-budget sampler itself can't help
-   * here: empty blocks consume zero budget tokens, so its forcing exit
-   * never triggers).
+   * `max_tokens` sent on every request; bounds each turn's generation.
+   * A finite default (8192) is what stops a server from looping forever when a model gets stuck emitting empty `...` think-tag pairs — the loop emits only the tag tokens, which still count toward `max_tokens`, so the cap fires and the server returns `finish_reason: "length"` instead of running unbounded (the reasoning-budget sampler itself can't help here: empty blocks consume zero budget tokens, so its forcing exit never triggers).
    */
   readonly maxTokens: number;
   /** Optional `temperature` passed through to the API. */
@@ -80,22 +59,16 @@ interface OpenaiConfig {
   /** Extra headers merged into every request (proxies, beta features, …). */
   readonly extraHeaders: Record<string, string>;
   /**
-   * Extra keys merged into every request body (server-specific params),
-   * applied last so they override boop's core fields. The use case is
-   * passing things boop has no first-class knob for — most commonly
-   * `chat_template_kwargs.enable_thinking` to turn a reasoning model's
-   * thinking on/off per request (llama.cpp/vLLM accept this in the body,
-   * OpenAI-compatible). Unlike `extraHeaders`, values may be any JSON type.
+   * Extra keys merged into every request body (server-specific params), applied last so they override boop's core fields.
+   * The use case is passing things boop has no first-class knob for — most commonly `chat_template_kwargs.enable_thinking` to turn a reasoning model's thinking on/off per request (llama.cpp/vLLM accept this in the body, OpenAI-compatible).
+   * Unlike `extraHeaders`, values may be any JSON type.
    */
   readonly extraBody: Record<string, unknown>;
 }
 
 /**
- * Loads and validates the executor config from `{configDir}/config.json`,
- * applying `BOOP_OPENAI_*` env overrides. A missing file is fine (but
- * `baseUrl` and `model` have no defaults, so they must come from env or the
- * file); a malformed file fails init loudly, matching the core's config
- * loader tone.
+ * Loads and validates the executor config from `{configDir}/config.json`, applying `BOOP_OPENAI_*` env overrides.
+ * A missing file is fine (but `baseUrl` and `model` have no defaults, so they must come from env or the file); a malformed file fails init loudly, matching the core's config loader tone.
  */
 function loadConfig(configDir: string, log: Logger): OpenaiConfig {
   const path = join(configDir, "config.json");
@@ -197,10 +170,8 @@ function loadConfig(configDir: string, log: Logger): OpenaiConfig {
  * Resolves the API key, never stored in the config file:
  *
  * 1. `BOOP_OPENAI_API_KEY` env, if set → used directly (overrides everything).
- * 2. `"apiKeyEnv": null` in the file → no auth; skip the `Authorization`
- *    header (for local no-auth servers like Ollama / llama.cpp).
- * 3. `"apiKeyEnv": "<NAME>"` (default `OPENAI_API_KEY`) → read that env var;
- *    unset → init fails naming the variable and how to disable auth.
+ * 2. `"apiKeyEnv": null` in the file → no auth; skip the `Authorization` header (for local no-auth servers like Ollama / llama.cpp).
+ * 3. `"apiKeyEnv": "<NAME>"` (default `OPENAI_API_KEY`) → read that env var; unset → init fails naming the variable and how to disable auth.
  */
 function resolveApiKey(
   file: Record<string, unknown>,
@@ -228,21 +199,15 @@ function resolveApiKey(
 const MAX_RETRIES = 3;
 
 /**
- * Runs the prepared session's agentic loop: build the OpenAI message list
- * from the system prompt + prepared messages, then loop — post a
- * completion, record the assistant turn, dispatch any tool calls
- * in-process, feed the results back, repeat — until the model stops with no
- * tool calls or the iteration cap is hit. Always returns a transcript; a
- * request failure or the iteration cap produces a final assistant entry
- * rather than throwing, so the loop never crashes the session.
+ * Runs the prepared session's agentic loop: build the OpenAI message list from the system prompt + prepared messages, then loop — post a completion, record the assistant turn, dispatch any tool calls in-process, feed the results back, repeat — until the model stops with no tool calls or the iteration cap is hit.
+ * Always returns a transcript; a request failure or the iteration cap produces a final assistant entry rather than throwing, so the loop never crashes the session.
  */
 const run = async (
   session: PreparedSession,
   config: OpenaiConfig,
   log: Logger,
 ): Promise<SessionTranscript> => {
-  // Seed the transcript exactly like the claude executor: the system prompt
-  // and the prepared user/assistant turns, then the loop appends.
+  // Seed the transcript exactly like the claude executor: the system prompt and the prepared user/assistant turns, then the loop appends.
   const entries: TranscriptEntry[] = [
     { role: "system", content: session.systemPrompt },
     ...session.messages.map((m): TranscriptEntry => ({
@@ -251,8 +216,8 @@ const run = async (
     })),
   ];
 
-  // The running conversation sent to the API, seeded the same way. Tool
-  // turns are appended as the loop runs.
+  // The running conversation sent to the API, seeded the same way.
+  // Tool turns are appended as the loop runs.
   const messages: ChatMessage[] = [
     { role: "system", content: session.systemPrompt },
     ...session.messages.map((m): ChatMessage => ({
@@ -290,25 +255,16 @@ const run = async (
     const rawText = msg.content ?? "";
     const capped = choice.finish_reason === "length";
 
-    // If the model hit the token cap without producing a tool call or any
-    // text, say so in the transcript rather than recording a silent empty
-    // turn — this is the signature of the llama.cpp empty-`...`-tag loop
-    // (or a legit reasoning turn that ran out of budget); either way the
-    // recording should make it visible. The cap itself is what bounds the
-    // runaway: the loop emits only the think-tag tokens, which count toward
-    // `max_tokens`, so a finite cap turns an infinite hang into a bounded one.
+    // If the model hit the token cap without producing a tool call or any text, say so in the transcript rather than recording a silent empty turn — this is the signature of the llama.cpp empty-`...`-tag loop (or a legit reasoning turn that ran out of budget); either way the recording should make it visible.
+    // The cap itself is what bounds the runaway: the loop emits only the think-tag tokens, which count toward `max_tokens`, so a finite cap turns an infinite hang into a bounded one.
     const assistantText =
       capped && toolCalls.length === 0 && rawText.length === 0
         ? "(hit max_tokens without producing a tool call or text)"
         : rawText;
 
-    // Record the assistant turn (text, thinking, tool calls) and echo it
-    // back into the running conversation. Built with spreads because
-    // TranscriptEntry fields are readonly; `thinking` rides the index
-    // signature, matching how the claude executor records it. The message
-    // sent back to the API carries `rawText`, not the annotated note — the
-    // note only applies when there are no tool calls, in which case we
-    // return below and the message is never sent.
+    // Record the assistant turn (text, thinking, tool calls) and echo it back into the running conversation.
+    // Built with spreads because TranscriptEntry fields are readonly; `thinking` rides the index signature, matching how the claude executor records it.
+    // The message sent back to the API carries `rawText`, not the annotated note — the note only applies when there are no tool calls, in which case we return below and the message is never sent.
     const thinking = extractThinking(msg);
     const assistantEntry: TranscriptEntry = {
       role: "assistant",
@@ -334,10 +290,9 @@ const run = async (
       });
     }
 
-    // No tool calls → the model is done. (`tool_calls` finish_reason, or a
-    // server that sends `stop` with tool_calls present, falls through and
-    // continues.) A capped empty turn ends the session here rather than
-    // looping forever.
+    // No tool calls → the model is done.
+    // (`tool_calls` finish_reason, or a server that sends `stop` with tool_calls present, falls through and continues.)
+    // A capped empty turn ends the session here rather than looping forever.
     if (toolCalls.length === 0) {
       log.info("session complete", { iterations: iteration + 1, capped });
       return { entries };
@@ -363,8 +318,7 @@ const run = async (
       }
       const toolText = result.content.map((b) => b.text ?? "").join("");
       const isError = result.isError === true;
-      // OpenAI's `tool` role has no error flag; signal failure with a
-      // `[error]` prefix in the content (the conventional textual cue).
+      // OpenAI's `tool` role has no error flag; signal failure with a `[error]` prefix in the content (the conventional textual cue).
       const feedback = isError ? `[error] ${toolText}` : toolText;
       messages.push({
         role: "tool",
@@ -394,11 +348,8 @@ const run = async (
 };
 
 /**
- * One non-streaming Chat Completions request with bounded retry on
- * transient errors (429 / 5xx / timeout / network). A transient error that
- * exhausts retries, or any non-transient HTTP status, comes back as a
- * `{ error }` response rather than throwing — the loop turns that into a
- * final assistant entry.
+ * One non-streaming Chat Completions request with bounded retry on transient errors (429 / 5xx / timeout / network).
+ * A transient error that exhausts retries, or any non-transient HTTP status, comes back as a `{ error }` response rather than throwing — the loop turns that into a final assistant entry.
  */
 async function chatCompletion(
   config: OpenaiConfig,
@@ -413,9 +364,7 @@ async function chatCompletion(
   if (config.temperature !== undefined && Number.isFinite(config.temperature)) {
     body.temperature = config.temperature;
   }
-  // `extraBody` wins over the core fields above: applied last so a user can
-  // override boop's defaults (or add server-specific ones like
-  // `chat_template_kwargs`) without boop knowing about them.
+  // `extraBody` wins over the core fields above: applied last so a user can override boop's defaults (or add server-specific ones like `chat_template_kwargs`) without boop knowing about them.
   Object.assign(body, config.extraBody);
 
   const headers: Record<string, string> = {
@@ -526,10 +475,9 @@ function toToolCall(tc: OpenaiToolCall): ToolCall {
 }
 
 /**
- * Parses an OpenAI tool-call's `arguments` JSON string. Returns `undefined`
- * for unparseable or non-object input (the loop turns that into an `isError`
- * tool result rather than crashing). The `log` is optional so {@link toToolCall}
- * can reuse this for transcript recording without a logger in scope.
+ * Parses an OpenAI tool-call's `arguments` JSON string.
+ * Returns `undefined` for unparseable or non-object input (the loop turns that into an `isError` tool result rather than crashing).
+ * The `log` is optional so {@link toToolCall} can reuse this for transcript recording without a logger in scope.
  */
 function tryParseArgs(
   raw: string,
@@ -550,9 +498,8 @@ function tryParseArgs(
 }
 
 /**
- * Pulls a reasoning/thinking summary out of an assistant message. Servers
- * disagree on the field name (`reasoning`, `reasoning_content`, `thinking`);
- * check the common ones and return whichever is present, or `undefined`.
+ * Pulls a reasoning/thinking summary out of an assistant message.
+ * Servers disagree on the field name (`reasoning`, `reasoning_content`, `thinking`); check the common ones and return whichever is present, or `undefined`.
  */
 function extractThinking(msg: {
   reasoning?: string;
