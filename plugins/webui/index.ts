@@ -103,7 +103,7 @@ class WebuiChannel implements ResponseChannel {
 /**
  * A builtin webui plugin.
  * It serves a small single-page webui from its `src/` directory under `/ui/`, and upgrades `/ws` to a live WebSocket that is both an event provider (client connect + submitted messages are enqueued) and a response channel (the agent's `respond` tool writes back through the same socket).
- * Each connection owns one {@link WebuiChannel}, registered for the life of the connection; a heartbeat (ping/pong) unregisters the channel promptly when a client vanishes without a clean close.
+ * Each connection owns one {@link WebuiChannel} keyed by the client's per-tab instance id, registered for the life of the connection; a heartbeat (ping/pong) unregisters the channel promptly when a client vanishes without a clean close, and a reconnect re-registers under the same id so the agent's reply path survives a blip.
  *
  * The plugin depends only on the {@link Plugin} contract (plus the `ws` server library), not on any core implementation, so it could be moved to an external package as-is.
  *
@@ -112,9 +112,9 @@ class WebuiChannel implements ResponseChannel {
  *   GET  /            ->  302 to /ui/
  *   WS   /ws          ->  per-connection event provider + response channel
  *
- * Events enqueued per connection, each carrying `responseChannel: <id>`:
- *   { source: "webui", payload: { type: "connect", responseChannel } }
- *   { source: "webui", payload: { type: "message", text, responseChannel } }
+ * Events enqueued, each carrying `responseChannel` (the reply path, keyed by the per-tab instance id), `clientId` (the persistent parent — one per browser, shared across tabs), and `instanceId` (the per-tab sub-id, new per tab):
+ *   { source: "webui", payload: { type: "connect", responseChannel, clientId, instanceId } }   — only on a new tab (a fresh, unseen instance id), not on a reconnect
+ *   { source: "webui", payload: { type: "message", text, responseChannel, clientId, instanceId } }
  */
 export const webuiPlugin: Plugin = {
   name: "webui",
@@ -146,12 +146,15 @@ export const webuiPlugin: Plugin = {
     });
     log.info("websocket at /ws");
 
+    // Instance ids the server has already enqueued a `connect` for this process lifetime.
+    // A reconnect reuses the same instance id; the client's `fresh` flag tells us whether this is a new tab (fresh) or a reconnect (not fresh), and this set guards against a refresh within the same server lifetime re-enqueuing for an id we have already seen.
+    const seenInstances = new Set<string>();
+
     function onConnection(ws: WebSocket): void {
-      const id = randomUUID();
-      const channel = new WebuiChannel(id, ws);
-      host.responses.register(channel);
-      host.events.enqueue("webui", { type: "connect", responseChannel: id });
-      log.debug("connect", { id });
+      // Unknown until the hello frame arrives: the channel is not registered and no event is enqueued until we know which client instance this socket belongs to.
+      let instanceId: string | null = null;
+      let clientId = "unknown";
+      let channel: WebuiChannel | null = null;
 
       ws.on("message", (data: RawData) => {
         const buf = Array.isArray(data)
@@ -160,12 +163,60 @@ export const webuiPlugin: Plugin = {
             ? data
             : Buffer.from(data as ArrayBuffer);
         const text = buf.toString("utf8");
+
+        // The first frame is the hello: { type: "hello", clientId, instanceId, fresh }.
+        // Until it arrives we do not know which client instance this is, so ignore anything else; after it arrives, every frame is a user message (plain text).
+        if (instanceId === null) {
+          let hello: unknown;
+          try {
+            hello = JSON.parse(text);
+          } catch {
+            return;
+          }
+          if (typeof hello !== "object" || hello === null) return;
+          const h = hello as {
+            type?: string;
+            clientId?: string;
+            instanceId?: string;
+            fresh?: boolean;
+          };
+          if (h.type !== "hello") return;
+          instanceId =
+            typeof h.instanceId === "string" ? h.instanceId : randomUUID();
+          clientId = typeof h.clientId === "string" ? h.clientId : "unknown";
+          const fresh = h.fresh === true;
+
+          // Reuse the instance id as the response channel id so a reconnect re-registers under the same id and the agent's in-flight `respond` calls keep targeting the stable instance.
+          // `unregister` is idempotent: it clears any stale channel left by a socket whose `close` has not fired yet, then registers the fresh one.
+          host.responses.unregister(instanceId);
+          channel = new WebuiChannel(instanceId, ws);
+          host.responses.register(channel);
+
+          // Enqueue a `connect` only for a genuinely new tab: `fresh` (the client's "first open of this page load") and an instance id we have not already connected this process lifetime.
+          // A reconnect — network blip or server restart — sends `fresh:false`, so no new event; a refresh within the same lifetime is suppressed by the seen set.
+          if (fresh && !seenInstances.has(instanceId)) {
+            seenInstances.add(instanceId);
+            host.events.enqueue("webui", {
+              type: "connect",
+              responseChannel: instanceId,
+              clientId,
+              instanceId,
+            });
+            log.debug("connect", { id: instanceId, clientId, fresh });
+          } else {
+            log.debug("reconnect", { id: instanceId, clientId, fresh });
+          }
+          return;
+        }
+
         host.events.enqueue("webui", {
           type: "message",
           text,
-          responseChannel: id,
+          responseChannel: instanceId,
+          clientId,
+          instanceId,
         });
-        log.debug("message", { id, len: text.length });
+        log.debug("message", { id: instanceId, len: text.length });
       });
 
       // Heartbeat: ping every HEARTBEAT_MS and mark alive on pong.
@@ -176,7 +227,7 @@ export const webuiPlugin: Plugin = {
       });
       const ping = setInterval(() => {
         if (!alive) {
-          log.debug("heartbeat timeout, terminating", { id });
+          log.debug("heartbeat timeout, terminating", { id: instanceId });
           ws.terminate();
           return;
         }
@@ -186,8 +237,8 @@ export const webuiPlugin: Plugin = {
 
       const cleanup = (): void => {
         clearInterval(ping);
-        host.responses.unregister(id);
-        log.debug("disconnect", { id });
+        if (channel !== null) host.responses.unregister(channel.id);
+        log.debug("disconnect", { id: instanceId });
       };
       ws.on("close", cleanup);
       ws.on("error", cleanup);

@@ -1,6 +1,7 @@
 // The webui entry.
 // Connects a WebSocket to `/ws`, renders incoming agent replies as bubbles in a centered #stream column, and sends the composer's text on submit.
-// The backend (`plugins/webui/index.ts`) enqueues a `webui` event per connection and per submitted message and registers a response channel so the agent's `respond` tool writes back through the same socket — those replies arrive here as `onmessage`.
+// The backend (`plugins/webui/index.ts`) enqueues a `webui` event per new tab (a `connect`) and per submitted message, and registers a response channel so the agent's `respond` tool writes back through the same socket — those replies arrive here as `onmessage`.
+// A reconnect (network blip, server restart) reuses the same per-tab instance id with `fresh:false` so it does not enqueue a fresh `connect`; only a new tab — a new instance id — does (see the hello frame sent in `connect`).
 //
 // Stays within erasable syntax (no enums, namespaces, or parameter properties) so the server's type-stripping pipeline serves it unchanged.
 
@@ -11,25 +12,40 @@ const form = document.getElementById("composer") as HTMLFormElement | null;
 const input = document.getElementById("composer-input") as HTMLInputElement | null;
 const sendButton = document.getElementById("composer-send") as HTMLButtonElement | null;
 
-if (
-  app !== null &&
-  stream !== null &&
-  status !== null &&
-  form !== null &&
-  input !== null &&
-  sendButton !== null
-) {
-  run(app, stream, status, form, input, sendButton);
+/** `localStorage` key for the persistent parent id (one per browser, shared across tabs). */
+const CLIENT_ID_KEY = "boop.client-id";
+/** `sessionStorage` key for the per-tab instance id (cleared when the tab closes, so a new tab gets a new id). */
+const INSTANCE_ID_KEY = "boop.instance-id";
+
+/** A v4 UUID; `crypto.randomUUID` in secure contexts (HTTPS, localhost), with a `Math.random` fallback for insecure ones (plain HTTP on a LAN IP) so the ids still exist where `randomUUID` is unavailable. */
+function uuid(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === "x" ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
 }
 
-function run(
+/** Reads `key` from `storage`, generating and persisting a fresh UUID if it is absent, so the returned id is stable across reloads for that storage's lifetime. */
+function persistentId(storage: Storage, key: string): string {
+  const existing = storage.getItem(key);
+  if (existing !== null) return existing;
+  const id = uuid();
+  storage.setItem(key, id);
+  return id;
+}
+
+const run = (
   _app: HTMLElement,
   stream: HTMLOListElement,
   status: HTMLSpanElement,
   form: HTMLFormElement,
   input: HTMLInputElement,
   sendButton: HTMLButtonElement,
-): void {
+): void => {
   /** Is the stream scrolled to (near) the bottom? Drives auto-stick. */
   function atBottom(): boolean {
     const threshold = 64;
@@ -71,6 +87,12 @@ function run(
     input.value = "";
   });
 
+  // Persistent parent id (one per browser, in `localStorage`) and per-tab instance id (in `sessionStorage`, so it survives reloads but changes when the tab is closed and a new one opens).
+  // The server enqueues a `connect` only for a new tab (a new instance id, signalled by `fresh:true` on the first open of this page load); a reconnect reuses the same ids with `fresh:false` so a blip or server restart does not look like a new client.
+  const clientId = persistentId(localStorage, CLIENT_ID_KEY);
+  const instanceId = persistentId(sessionStorage, INSTANCE_ID_KEY);
+  let greeted = false;
+
   // Reconnect with simple linear backoff capped at ~10s.
   // The first attempt is immediate so a page load hits `/ws` right away.
   let ws: WebSocket | null = null;
@@ -87,6 +109,10 @@ function run(
     ws = socket;
 
     socket.addEventListener("open", () => {
+      // Greet the server with the persistent ids; `fresh` is true only on the first open of this page load, so a reconnect (network blip, server restart) reuses the same instance id without enqueuing a new `connect` event.
+      const fresh = !greeted;
+      greeted = true;
+      socket.send(JSON.stringify({ type: "hello", clientId, instanceId, fresh }));
       backoff = 1000;
       setConnected(true);
       input.focus();
@@ -122,4 +148,15 @@ function run(
       // A registration failure only means no offline shell; the app still works online.
     });
   }
+};
+
+if (
+  app !== null &&
+  stream !== null &&
+  status !== null &&
+  form !== null &&
+  input !== null &&
+  sendButton !== null
+) {
+  run(app, stream, status, form, input, sendButton);
 }
