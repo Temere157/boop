@@ -28,9 +28,12 @@ body {
   /* Centered column: fixed width, full viewport height, centered horizontally. */
   width: 100%;
   max-width: 680px;
+  /* `100dvh` adapts to the mobile viewport (notch, home indicator); `100vh` is the fallback for browsers without dynamic viewport units. */
   height: 100vh;
+  height: 100dvh;
   margin: 0 auto;
-  padding: 0 1rem;
+  /* Horizontal content padding plus the safe-area insets so the header and composer clear the notch and home indicator in standalone mode. */
+  padding: env(safe-area-inset-top) 1rem env(safe-area-inset-bottom) 1rem;
 }
 
 #header {

@@ -19,6 +19,10 @@
           buildInputs = [
             nodejs
             pkgs.typescript-language-server
+            # `just` runs the task recipes in the top-level justfile (e.g. `just webui-icons`).
+            pkgs.just
+            # `resvg` renders the webui PWA icons from the source SVG (see `just webui-icons`).
+            pkgs.resvg
           ];
         };
 

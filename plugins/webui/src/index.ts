@@ -114,4 +114,12 @@ function run(
 
   setConnected(false);
   connect();
+
+  // Register the app-shell service worker so the webui opens offline and is installable as a homescreen app.
+  // The guard degrades to the online-only SPA in browsers without service-worker support.
+  if ("serviceWorker" in navigator) {
+    navigator.serviceWorker.register("./sw.ts", { scope: "./" }).catch(() => {
+      // A registration failure only means no offline shell; the app still works online.
+    });
+  }
 }

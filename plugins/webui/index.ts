@@ -12,12 +12,23 @@ const SRC_DIR = fileURLToPath(new URL("./src/", import.meta.url));
 /** Heartbeat interval: how often to ping each connection to probe liveness. */
 const HEARTBEAT_MS = 15_000;
 
-/** Content-Type per served extension; unknown falls back to octet-stream. */
-const CONTENT_TYPE: Record<string, string> = {
+/** Content-Type for text extensions served verbatim; unknown text extensions fall back to the caller. */
+const TEXT_CONTENT_TYPE: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
   ".css": "text/css; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
   ".mjs": "text/javascript; charset=utf-8",
+  ".json": "application/json; charset=utf-8",
+  ".webmanifest": "application/manifest+json; charset=utf-8",
+  ".svg": "image/svg+xml; charset=utf-8",
+};
+
+/** Content-Type for binary extensions served verbatim; unknown falls back to octet-stream. */
+const BINARY_CONTENT_TYPE: Record<string, string> = {
+  ".png": "image/png",
+  ".ico": "image/x-icon",
+  ".jpg": "image/jpeg",
+  ".webp": "image/webp",
 };
 
 /** Content-Type for `.ts` served as JavaScript after type stripping. */
@@ -38,18 +49,25 @@ async function serveFile(
   name: string,
 ): Promise<HttpResponse> {
   const ext = extname(name);
-  const body = await readFile(filePath, "utf8");
   if (ext === ".ts") {
+    const body = stripTypeScriptTypes(await readFile(filePath, "utf8"));
     return {
       status: 200,
       headers: { "content-type": TS_CONTENT_TYPE },
-      body: stripTypeScriptTypes(body),
+      body,
     };
   }
+  const textType = TEXT_CONTENT_TYPE[ext];
+  if (textType !== undefined) {
+    const body = await readFile(filePath, "utf8");
+    return { status: 200, headers: { "content-type": textType }, body };
+  }
+  // Binary assets (icons, etc.) are read as a Buffer so the bytes are not corrupted by UTF-8 decoding.
+  const body = await readFile(filePath);
   return {
     status: 200,
     headers: {
-      "content-type": CONTENT_TYPE[ext] ?? "application/octet-stream",
+      "content-type": BINARY_CONTENT_TYPE[ext] ?? "application/octet-stream",
     },
     body,
   };
