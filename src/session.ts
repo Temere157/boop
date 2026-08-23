@@ -107,6 +107,11 @@ export class SessionRunner {
     for (const entry of transcript.entries) {
       this.logEntry(entry);
     }
+    // The final entry is the session's one-line summary; surface it at info level so a scan of the logs shows what each session did without decoding the trace.
+    const last = transcript.entries[transcript.entries.length - 1];
+    if (last !== undefined && last.role === "assistant") {
+      sessionLog.info(`summary: ${last.content}`, { id: event.id, source: event.source });
+    }
   }
 
   private logEntry(entry: TranscriptEntry): void {
