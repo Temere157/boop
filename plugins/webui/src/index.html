@@ -2,7 +2,8 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <!-- `interactive-widget=resizes-content` makes the keyboard resize the layout viewport (and `dvh` units) instead of offsetting it, so `#app` shrinks to the visible area and the composer stays fixed with no outer scroll. Ignored by browsers that don't support it (current iOS), so it lands forward-compatibly. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content" />
     <title>boop</title>
     <link rel="manifest" href="./manifest.webmanifest" />
     <link rel="icon" href="./icon-192.png" type="image/png" />

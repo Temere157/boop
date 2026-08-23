@@ -14,6 +14,8 @@ html,
 body {
   margin: 0;
   height: 100%;
+  /* Lock the outer chrome so only the inner #stream scrolls; on mobile this keeps the keyboard-focus composer from scrolling the whole page. */
+  overflow: hidden;
 }
 
 body {
@@ -32,6 +34,8 @@ body {
   height: 100vh;
   height: 100dvh;
   margin: 0 auto;
+  /* Reinforce the outer lock at the shell itself, since a focused input can otherwise scroll the nearest scrollable ancestor on mobile. */
+  overflow: hidden;
   /* Horizontal content padding plus the safe-area insets so the header and composer clear the notch and home indicator in standalone mode. */
   padding: env(safe-area-inset-top) 1rem env(safe-area-inset-bottom) 1rem;
 }
