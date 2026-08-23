@@ -1,5 +1,8 @@
 # <img src="plugins/webui/src/icon-512-maskable.png" width="32" height="32" alt="" />&nbsp;boop
 
+> [!WARNING]
+> Architecture? Mine.<br>Structure got a passing glance.<br>The impl? pure slop.
+
 A persistent, event-driven, single-user AI agent.
 Boop runs continuously and reacts to events from pluggable providers.
 Each event is handled by a short, transient session that loads what it needs from long-lived memory, does its work, and writes back what it learned before ending.
