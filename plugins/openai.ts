@@ -79,6 +79,15 @@ interface OpenaiConfig {
   readonly requestTimeoutMs: number;
   /** Extra headers merged into every request (proxies, beta features, …). */
   readonly extraHeaders: Record<string, string>;
+  /**
+   * Extra keys merged into every request body (server-specific params),
+   * applied last so they override boop's core fields. The use case is
+   * passing things boop has no first-class knob for — most commonly
+   * `chat_template_kwargs.enable_thinking` to turn a reasoning model's
+   * thinking on/off per request (llama.cpp/vLLM accept this in the body,
+   * OpenAI-compatible). Unlike `extraHeaders`, values may be any JSON type.
+   */
+  readonly extraBody: Record<string, unknown>;
 }
 
 /**
@@ -161,6 +170,16 @@ function loadConfig(configDir: string, log: Logger): OpenaiConfig {
   }
   const extraHeaders = (file.extraHeaders ?? {}) as Record<string, string>;
 
+  if (
+    file.extraBody !== undefined &&
+    (file.extraBody === null ||
+      typeof file.extraBody !== "object" ||
+      Array.isArray(file.extraBody))
+  ) {
+    throw new Error(`${path}: "extraBody" must be an object`);
+  }
+  const extraBody = (file.extraBody ?? {}) as Record<string, unknown>;
+
   return {
     baseUrl,
     model,
@@ -170,6 +189,7 @@ function loadConfig(configDir: string, log: Logger): OpenaiConfig {
     maxIterations,
     requestTimeoutMs,
     extraHeaders,
+    extraBody,
   };
 }
 
@@ -393,6 +413,10 @@ async function chatCompletion(
   if (config.temperature !== undefined && Number.isFinite(config.temperature)) {
     body.temperature = config.temperature;
   }
+  // `extraBody` wins over the core fields above: applied last so a user can
+  // override boop's defaults (or add server-specific ones like
+  // `chat_template_kwargs`) without boop knowing about them.
+  Object.assign(body, config.extraBody);
 
   const headers: Record<string, string> = {
     "content-type": "application/json",
