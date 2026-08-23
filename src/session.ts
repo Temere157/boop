@@ -165,6 +165,14 @@ function buildSystemPrompt(): string {
     "calls) is only logged; the user will not generally see it. To reach a",
     "user, use the `respond` tool against an open response channel, and to",
     "persist anything, write it to memory with the memory tools.",
+    "",
+    "Finish every session with a final plain-text assistant message (no",
+    "tool calls): a one-line summary of the outcome — what you did and what",
+    "changed. Once you have acted and have nothing left to do, write that",
+    "summary and stop — do not call further tools looking for more work.",
+    "This summary is what a later review of the session reads first, so",
+    "make it a useful, specific recap, not a greeting or a restatement of",
+    "the event.",
   ].join("\n");
 }
 
