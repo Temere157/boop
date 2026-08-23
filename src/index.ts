@@ -3,7 +3,7 @@ import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { configPath, loadConfig } from "./config.js";
-import { boopStateDir } from "./paths.js";
+import { boopConfigDir, boopStateDir } from "./paths.js";
 import type { Event } from "./event.js";
 import { ExecutorRegistry } from "./executors.js";
 import { HttpServer } from "./http.js";
@@ -52,8 +52,10 @@ const eventSink: EventSink = {
   },
 };
 
-// Per-plugin state directory base: `{boopStateDir}/plugins/{name}/`.
+// Per-plugin directory bases: `{boopStateDir}/plugins/{name}/` for state
+// and `{boopConfigDir}/plugins/{name}/` for config, scoped by plugin name.
 const pluginsStateDir = join(boopStateDir(), "plugins");
+const pluginsConfigDir = join(boopConfigDir(), "plugins");
 
 // Plugin directories scanned at startup, in order. For now just the core
 // plugins shipped in `plugins/`, resolved relative to this module so it
@@ -62,11 +64,13 @@ const pluginDirs = [fileURLToPath(new URL("../plugins/", import.meta.url))];
 const plugins = await loadPlugins(pluginDirs);
 // Each plugin depends only on the Plugin contract, so any of these could
 // be extracted into its own package without changes. Each gets its own
-// `paths.stateDir` (created before init) so a plugin can keep files
-// without colliding with another plugin.
+// `paths.stateDir` and `paths.configDir` (created before init) so a plugin
+// can keep state and read its own config without colliding with another.
 for (const plugin of plugins) {
   const stateDir = join(pluginsStateDir, plugin.name);
+  const configDir = join(pluginsConfigDir, plugin.name);
   await mkdir(stateDir, { recursive: true });
+  await mkdir(configDir, { recursive: true });
   const pluginHost: PluginHost = {
     events: eventSink,
     http: httpServer,
@@ -75,7 +79,7 @@ for (const plugin of plugins) {
     responses: responseChannels,
     prepare: preparerRegistry,
     log,
-    paths: { stateDir },
+    paths: { stateDir, configDir },
   };
   await plugin.init(pluginHost);
 }
