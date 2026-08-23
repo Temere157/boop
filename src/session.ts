@@ -179,21 +179,25 @@ function buildSystemPrompt(): string {
 /**
  * Renders the event as the session's first user message (the seed entry of
  * {@link PreparedSession.messages}), so the event arrives as a normal user
- * turn rather than being baked into the system prompt. The message also
- * enumerates every currently-open response channel — not just one tied to
- * this event, since channels are independent of events: an eternal SMS
- * channel is listed in every session message while a transient webui or
- * HTTP ingest channel appears only while its owner is holding it open.
- * This is a snapshot taken at `prepare()` time as a hint; the `respond`
- * tool queries the registry live, so a channel listed here may already be
- * gone by call time. Registered {@link SessionPreparer}s may add further
- * user/assistant messages after this seed.
+ * turn rather than being baked into the system prompt. The message states
+ * the current time — an environmental fact the agent cannot recover from
+ * memory (memory is the agent's own continuity, which it writes and which
+ * may be stale) — and enumerates every currently-open response channel, not
+ * just one tied to this event, since channels are independent of events:
+ * an eternal SMS channel is listed in every session message while a
+ * transient webui or HTTP ingest channel appears only while its owner is
+ * holding it open. This is a snapshot taken at `prepare()` time as a hint;
+ * the `respond` tool queries the registry live, so a channel listed here
+ * may already be gone by call time. Registered {@link SessionPreparer}s may
+ * add further user/assistant messages after this seed.
  */
 function buildFirstUserMessage(
   event: Event,
   channels: readonly ResponseChannel[],
 ): string {
   const lines = [
+    `Current time: ${new Date().toISOString()}`,
+    "",
     `Event source: ${event.source}`,
     "Event payload:",
     JSON.stringify(event.payload, null, 2),
