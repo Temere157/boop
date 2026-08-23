@@ -1,4 +1,4 @@
-# boop
+# <img src="plugins/webui/src/icon-512-maskable.png" width="32" height="32" alt="" />&nbsp;boop
 
 A persistent, event-driven, single-user AI agent.
 Boop runs continuously and reacts to events from pluggable providers.
