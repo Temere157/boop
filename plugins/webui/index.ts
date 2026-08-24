@@ -115,6 +115,79 @@ class WebuiChannel implements ResponseChannel {
   }
 }
 
+/** A prior turn in a tab's conversation, normalized to model-conventional roles for the session. */
+type HistoryTurn = { readonly role: "user" | "assistant"; readonly text: string };
+
+/** Hard cap on turns accepted from a client, defense in depth against a misbehaving or adversarial client. */
+const HISTORY_MAX_TURNS = 40;
+/** Hard cap on total history text bytes accepted from a client, so a large history can't bloat the event unbounded. */
+const HISTORY_MAX_BYTES = 32_768;
+
+/** The interpretation note included in the payload alongside `history`, so the model knows how to read it. */
+const HISTORY_NOTE = [
+  "`history` is the prior conversation in this tab, oldest first.",
+  "Each entry is `{role, text}`: `role:'user'` is what the human typed, `role:'assistant'` is what you previously sent back via the `respond` tool.",
+  "Your intermediate tool calls and reasoning from those earlier events are not included — only the user-visible thread.",
+  "The new message to act on is `text`.",
+  "Use `history` for context on what was already discussed; do not re-ask things it already answers.",
+].join(" ");
+
+/**
+ * Parses a client message frame.
+ * The client sends `{ type: "message", text, history }`; a frame that is not valid JSON or is missing the `text` string is treated as plain text (the message is the raw frame), so an old or odd client still works.
+ * Returns the message text and a sanitized history (or `undefined` when there is no usable history, so the caller omits the field and a first message looks unchanged).
+ */
+function parseClientMessage(raw: string): {
+  text: string;
+  history: HistoryTurn[] | undefined;
+} {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return { text: raw, history: undefined };
+  }
+  if (typeof parsed !== "object" || parsed === null) {
+    return { text: raw, history: undefined };
+  }
+  const f = parsed as { type?: unknown; text?: unknown; history?: unknown };
+  if (f.type !== "message" || typeof f.text !== "string") {
+    return { text: raw, history: undefined };
+  }
+  return { text: f.text, history: sanitizeHistory(f.history) };
+}
+
+/**
+ * Normalizes and caps a client-supplied `history` array.
+ * Each entry must be `{role:"user"|"assistant"|"agent", text:string}`; `agent` is mapped to `assistant` (the client's internal role name for a reply bubble).
+ * Entries that don't match are dropped, and the result is capped to the last {@link HISTORY_MAX_TURNS} turns and {@link HISTORY_MAX_BYTES} total text bytes.
+ * Returns `undefined` when nothing valid remains, so the caller omits the field and a first message looks unchanged.
+ */
+function sanitizeHistory(raw: unknown): HistoryTurn[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const out: HistoryTurn[] = [];
+  let bytes = 0;
+  for (const entry of raw) {
+    if (typeof entry !== "object" || entry === null) continue;
+    const role = (entry as { role?: unknown }).role;
+    const text = (entry as { text?: unknown }).text;
+    let normalized: "user" | "assistant";
+    if (role === "user") {
+      normalized = "user";
+    } else if (role === "assistant" || role === "agent") {
+      normalized = "assistant";
+    } else {
+      continue;
+    }
+    if (typeof text !== "string") continue;
+    bytes += Buffer.byteLength(text, "utf8");
+    if (bytes > HISTORY_MAX_BYTES) break;
+    out.push({ role: normalized, text });
+    if (out.length > HISTORY_MAX_TURNS) out.shift();
+  }
+  return out.length > 0 ? out : undefined;
+}
+
 /**
  * A builtin webui plugin.
  * It serves a small single-page webui from its `src/` directory under `/ui/`, and upgrades `/ws` to a live WebSocket that is both an event provider (client connect + submitted messages are enqueued) and a response channel (the agent's `respond` tool writes back through the same socket).
@@ -130,7 +203,7 @@ class WebuiChannel implements ResponseChannel {
  *
  * Events enqueued, each carrying `responseChannel` (the reply path, keyed by the per-tab instance id), `clientId` (the persistent parent — one per browser, shared across tabs), and `instanceId` (the per-tab sub-id, new per tab):
  *   { source: "webui", payload: { type: "connect", responseChannel, clientId, instanceId } }   — only on a new tab (a fresh, unseen instance id), not on a reconnect
- *   { source: "webui", payload: { type: "message", text, responseChannel, clientId, instanceId } }
+ *   { source: "webui", payload: { type: "message", text, history?, historyNote?, responseChannel, clientId, instanceId } }   — `history` (and `historyNote`) are present only when the tab had prior turns, so the transient session can see what was already discussed in this tab
  *
  * Frames sent to every connected client, so each tab reflects the agent's global state rather than only its own conversation:
  *   { type: "reply", text }                 — an agent reply (via the `respond` tool)
@@ -208,7 +281,7 @@ export const webuiPlugin: Plugin = {
         const text = buf.toString("utf8");
 
         // The first frame is the hello: { type: "hello", clientId, instanceId, fresh }.
-        // Until it arrives we do not know which client instance this is, so ignore anything else; after it arrives, every frame is a user message (plain text).
+        // Until it arrives we do not know which client instance this is, so ignore anything else; after it arrives, every frame is a submitted message — a JSON `{ type: "message", text, history }` frame (parsed below), falling back to plain text for an old or odd client.
         if (instanceId === null) {
           let hello: unknown;
           try {
@@ -261,14 +334,26 @@ export const webuiPlugin: Plugin = {
           return;
         }
 
-        host.events.enqueue("webui", {
+        // A submitted message: the client sends a JSON frame `{ type: "message", text, history }`; parse it so the event carries the tab's recent prior turns (giving the transient session continuity), falling back to plain text for an old or odd client.
+        const { text: messageText, history } = parseClientMessage(text);
+        const payload: Record<string, unknown> = {
           type: "message",
-          text,
+          text: messageText,
           responseChannel: instanceId,
           clientId,
           instanceId,
+        };
+        // Only include `history` (and the interpretation note) when there is something to carry, so a first message in a tab looks unchanged.
+        if (history !== undefined) {
+          payload.history = history;
+          payload.historyNote = HISTORY_NOTE;
+        }
+        host.events.enqueue("webui", payload);
+        log.debug("message", {
+          id: instanceId,
+          len: messageText.length,
+          hist: history?.length ?? 0,
         });
-        log.debug("message", { id: instanceId, len: text.length });
       });
 
       // Heartbeat: ping every HEARTBEAT_MS and mark alive on pong.

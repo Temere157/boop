@@ -1,5 +1,5 @@
 // The webui entry.
-// Connects a WebSocket to `/ws`, renders incoming agent replies as bubbles in a centered #stream column, and sends the composer's text on submit.
+// Connects a WebSocket to `/ws`, renders incoming agent replies as bubbles in a centered #stream column, and sends each submitted message as a JSON frame (`{ type: "message", text, history }`) carrying this tab's recent prior turns so the transient session handling the event can see what was already discussed in this tab.
 // The backend (`plugins/webui/index.ts`) enqueues a `webui` event per new tab (a `connect`) and per submitted message, and registers a response channel so the agent's `respond` tool writes back through the same socket — those replies arrive here as `reply` frames in the `onmessage` envelope.
 // The same socket also carries `status` frames: global busy/idle transitions from the core, so this tab shows a working indicator whenever any event is being handled — not just the ones it triggered.
 // A reconnect (network blip, server restart) reuses the same per-tab instance id with `fresh:false` so it does not enqueue a fresh `connect`; only a new tab — a new instance id — does (see the hello frame sent in `connect`).
@@ -105,6 +105,21 @@ const run = (
     }
   }
 
+  /**
+   * A capped, role-normalized view of this tab's prior turns, sent with each message so the transient session handling the event can see what was already discussed in this tab.
+   * The current message is excluded (it is added to `history` after the send, and it is the event's `text`), and `agent` roles are mapped to `assistant` so the model reads conventional turns.
+   * Returns the last `cap` entries; older turns beyond the cap are dropped to bound the payload size.
+   */
+  function recentHistory(
+    cap: number,
+  ): { role: "user" | "assistant"; text: string }[] {
+    const slice = history.slice(Math.max(0, history.length - cap));
+    return slice.map((h) => ({
+      role: h.role === "agent" ? "assistant" : h.role,
+      text: h.text,
+    }));
+  }
+
   // Connection and working state for the merged `#status` dot, so the title composes both signals and the working phase transitions survive a disconnect that recolors the dot mid-work.
   let isConnected = false;
   let isBusy = false;
@@ -169,7 +184,11 @@ const run = (
     event.preventDefault();
     const text = input.value.trim();
     if (text === "" || ws === null || ws.readyState !== WebSocket.OPEN) return;
-    ws.send(text);
+    // Send the message as a JSON frame carrying this tab's recent history, so the transient session handling the event can see what was already discussed in this tab.
+    // `history` excludes the current message (added to `history` below), which becomes the event's `text`.
+    ws.send(
+      JSON.stringify({ type: "message", text, history: recentHistory(20) }),
+    );
     addMessage("user", text);
     input.value = "";
   });
