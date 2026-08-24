@@ -304,9 +304,13 @@ export const remindersPlugin: Plugin = {
       {
         name: "reminder_create",
         description:
-          "Schedule a time-based reminder for the agent itself. " +
-          "When the reminder fires, a `reminder` event is handled like any other event, and the agent decides how (if at all) to notify the user via the open response channels; if none is open, write it to short-term memory and/or create a follow-up reminder rather than dropping it. " +
-          "`when` is an absolute ISO 8601 time (the session message gives you the current time, so compute the target from that). " +
+          "Schedule a time-based reminder whose target is you, the agent. " +
+          "When it fires you receive a `reminder` event carrying the `message`, and you decide what to do with it. " +
+          "Most reminders you create are proxies for the user — the user asked you to 'remind me …'. " +
+          "When such a reminder fires, relay its `message` to the user with the `respond` tool if a channel is open. " +
+          "If no channel is open, do not drop it: write it to memory and/or create a follow-up reminder so it is not lost. " +
+          "Reminders can also be for yourself (your own follow-ups, recurring self-checks), in which case act on the `message` directly rather than forwarding it. " +
+          "`when` is an absolute ISO 8601 time; the session message gives you the current time, so compute the target from that. " +
           "`recur` is an ISO 8601 duration (`PT30M`, `P1D`, `P1W`, …) for a recurring reminder, or null/omitted for a one-shot. " +
           "`count` bounds a recurring reminder to that many fires; `until` bounds it to a last-allowed ISO 8601 time. " +
           "Recurrence uses nominal month/year lengths (30/365 days), so a monthly reminder drifts from calendar months.",
@@ -315,7 +319,9 @@ export const remindersPlugin: Plugin = {
           properties: {
             message: {
               type: "string",
-              description: "The reminder text the agent will see when it fires.",
+              description:
+                "The reminder text, which you receive verbatim when it fires. " +
+                "Write it for yourself to act on: for a user reminder, state that it is for the user and what to tell them; for your own follow-up, state what you should do.",
             },
             when: {
               type: "string",
