@@ -123,6 +123,9 @@ const HISTORY_MAX_TURNS = 40;
 /** Hard cap on total history text bytes accepted from a client, so a large history can't bloat the event unbounded. */
 const HISTORY_MAX_BYTES = 32_768;
 
+/** Hard cap on a client-supplied `tz` label length, defense in depth against a misbehaving or adversarial client. */
+const TZ_MAX_LEN = 64;
+
 /** The interpretation note included in the payload alongside `history`, so the model knows how to read it. */
 const HISTORY_NOTE = [
   "`history` is the prior conversation in this tab, oldest first.",
@@ -140,21 +143,22 @@ const HISTORY_NOTE = [
 function parseClientMessage(raw: string): {
   text: string;
   history: HistoryTurn[] | undefined;
+  tz: string | undefined;
 } {
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
   } catch {
-    return { text: raw, history: undefined };
+    return { text: raw, history: undefined, tz: undefined };
   }
   if (typeof parsed !== "object" || parsed === null) {
-    return { text: raw, history: undefined };
+    return { text: raw, history: undefined, tz: undefined };
   }
-  const f = parsed as { type?: unknown; text?: unknown; history?: unknown };
+  const f = parsed as { type?: unknown; text?: unknown; history?: unknown; tz?: unknown };
   if (f.type !== "message" || typeof f.text !== "string") {
-    return { text: raw, history: undefined };
+    return { text: raw, history: undefined, tz: undefined };
   }
-  return { text: f.text, history: sanitizeHistory(f.history) };
+  return { text: f.text, history: sanitizeHistory(f.history), tz: sanitizeTz(f.tz) };
 }
 
 /**
@@ -189,6 +193,16 @@ function sanitizeHistory(raw: unknown): HistoryTurn[] | undefined {
 }
 
 /**
+ * Validates a client-supplied `tz` label.
+ * A non-empty string within the length cap is passed through; anything else returns `undefined` so the caller omits the field and an old or odd client (one that does not send `tz`) still works unchanged.
+ */
+function sanitizeTz(raw: unknown): string | undefined {
+  if (typeof raw !== "string") return undefined;
+  if (raw.length === 0 || raw.length > TZ_MAX_LEN) return undefined;
+  return raw;
+}
+
+/**
  * A builtin webui plugin.
  * It serves a small single-page webui from its `src/` directory under `/ui/`, and upgrades `/ws` to a live WebSocket that is both an event provider (client connect + submitted messages are enqueued) and a response channel (the agent's `respond` tool writes back through the same socket).
  * Each connection owns one {@link WebuiChannel} keyed by the client's per-tab instance id, registered for the life of the connection; a heartbeat (ping/pong) unregisters the channel promptly when a client vanishes without a clean close, and a reconnect re-registers under the same id so the agent's reply path survives a blip.
@@ -202,8 +216,8 @@ function sanitizeHistory(raw: unknown): HistoryTurn[] | undefined {
  *   WS   /ws          ->  per-connection event provider + response channel
  *
  * Events enqueued, each carrying `responseChannel` (the reply path, keyed by the per-tab instance id), `clientId` (the persistent parent — one per browser, shared across tabs), and `instanceId` (the per-tab sub-id, new per tab):
- *   { source: "webui", payload: { type: "connect", responseChannel, clientId, instanceId } }   — only on a new tab (a fresh, unseen instance id), not on a reconnect
- *   { source: "webui", payload: { type: "message", text, history?, historyNote?, responseChannel, clientId, instanceId } }   — `history` (and `historyNote`) are present only when the tab had prior turns, so the transient session can see what was already discussed in this tab
+ *   { source: "webui", payload: { type: "connect", responseChannel, clientId, instanceId, tz? } }   — only on a new tab (a fresh, unseen instance id), not on a reconnect
+ *   { source: "webui", payload: { type: "message", text, history?, historyNote?, tz?, responseChannel, clientId, instanceId } }   — `history` (and `historyNote`) are present only when the tab had prior turns, so the transient session can see what was already discussed in this tab; `tz` (the user's current local timezone label) is present when the client sent one
  *
  * Frames sent to every connected client, so each tab reflects the agent's global state rather than only its own conversation:
  *   { type: "reply", text }                 — an agent reply (via the `respond` tool)
@@ -280,8 +294,8 @@ export const webuiPlugin: Plugin = {
             : Buffer.from(data as ArrayBuffer);
         const text = buf.toString("utf8");
 
-        // The first frame is the hello: { type: "hello", clientId, instanceId, fresh }.
-        // Until it arrives we do not know which client instance this is, so ignore anything else; after it arrives, every frame is a submitted message — a JSON `{ type: "message", text, history }` frame (parsed below), falling back to plain text for an old or odd client.
+        // The first frame is the hello: { type: "hello", clientId, instanceId, fresh, tz }.
+        // Until it arrives we do not know which client instance this is, so ignore anything else; after it arrives, every frame is a submitted message — a JSON `{ type: "message", text, history, tz }` frame (parsed below), falling back to plain text for an old or odd client.
         if (instanceId === null) {
           let hello: unknown;
           try {
@@ -295,12 +309,14 @@ export const webuiPlugin: Plugin = {
             clientId?: string;
             instanceId?: string;
             fresh?: boolean;
+            tz?: string;
           };
           if (h.type !== "hello") return;
           instanceId =
             typeof h.instanceId === "string" ? h.instanceId : randomUUID();
           clientId = typeof h.clientId === "string" ? h.clientId : "unknown";
           const fresh = h.fresh === true;
+          const tz = sanitizeTz(h.tz);
 
           // Reuse the instance id as the response channel id so a reconnect re-registers under the same id and the agent's in-flight `respond` calls keep targeting the stable instance.
           // `unregister` is idempotent: it clears any stale channel left by a socket whose `close` has not fired yet, then registers the fresh one.
@@ -321,21 +337,24 @@ export const webuiPlugin: Plugin = {
           // A reconnect — network blip or server restart — sends `fresh:false`, so no new event; a refresh within the same lifetime is suppressed by the seen set.
           if (fresh && !seenInstances.has(instanceId)) {
             seenInstances.add(instanceId);
-            host.events.enqueue("webui", {
+            const payload: Record<string, unknown> = {
               type: "connect",
               responseChannel: instanceId,
               clientId,
               instanceId,
-            });
-            log.debug("connect", { id: instanceId, clientId, fresh });
+            };
+            // Only include `tz` when the client sent a usable label, so an old or odd client still works unchanged.
+            if (tz !== undefined) payload.tz = tz;
+            host.events.enqueue("webui", payload);
+            log.debug("connect", { id: instanceId, clientId, fresh, tz: tz ?? null });
           } else {
             log.debug("reconnect", { id: instanceId, clientId, fresh });
           }
           return;
         }
 
-        // A submitted message: the client sends a JSON frame `{ type: "message", text, history }`; parse it so the event carries the tab's recent prior turns (giving the transient session continuity), falling back to plain text for an old or odd client.
-        const { text: messageText, history } = parseClientMessage(text);
+        // A submitted message: the client sends a JSON frame `{ type: "message", text, history, tz }`; parse it so the event carries the tab's recent prior turns (giving the transient session continuity) and the user's current local timezone, falling back to plain text for an old or odd client.
+        const { text: messageText, history, tz } = parseClientMessage(text);
         const payload: Record<string, unknown> = {
           type: "message",
           text: messageText,
@@ -348,6 +367,8 @@ export const webuiPlugin: Plugin = {
           payload.history = history;
           payload.historyNote = HISTORY_NOTE;
         }
+        // Only include `tz` when the client sent a usable label, so an old or odd client (one without `tz`) still works unchanged.
+        if (tz !== undefined) payload.tz = tz;
         host.events.enqueue("webui", payload);
         log.debug("message", {
           id: instanceId,

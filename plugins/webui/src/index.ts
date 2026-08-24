@@ -61,6 +61,21 @@ function loadHistory(): HistoryEntry[] {
   return out;
 }
 
+/**
+ * The user's current local timezone as `America/New_York (UTC-05:00)`, recomputed at call time so DST and a moved zone stay correct across a long-lived tab.
+ * The IANA name gives the zone's semantics (including its DST rules); the offset gives instant arithmetic without the model needing to know those rules.
+ * `getTimezoneOffset` already encodes DST, so the label is correct for the day it is sent.
+ */
+function localTzLabel(): string {
+  const name = Intl.DateTimeFormat().resolvedOptions().timeZone ?? "UTC";
+  const offsetMin = -new Date().getTimezoneOffset();
+  const sign = offsetMin >= 0 ? "+" : "-";
+  const abs = Math.abs(offsetMin);
+  const hh = String(Math.floor(abs / 60)).padStart(2, "0");
+  const mm = String(abs % 60).padStart(2, "0");
+  return `${name} (UTC${sign}${hh}:${mm})`;
+}
+
 /** Reads `key` from `storage`, generating and persisting a fresh UUID if it is absent, so the returned id is stable across reloads for that storage's lifetime. */
 function persistentId(storage: Storage, key: string): string {
   const existing = storage.getItem(key);
@@ -186,8 +201,14 @@ const run = (
     if (text === "" || ws === null || ws.readyState !== WebSocket.OPEN) return;
     // Send the message as a JSON frame carrying this tab's recent history, so the transient session handling the event can see what was already discussed in this tab.
     // `history` excludes the current message (added to `history` below), which becomes the event's `text`.
+    // `tz` is the user's current local timezone label, recomputed at send time so DST and a moved zone stay correct.
     ws.send(
-      JSON.stringify({ type: "message", text, history: recentHistory(20) }),
+      JSON.stringify({
+        type: "message",
+        text,
+        history: recentHistory(20),
+        tz: localTzLabel(),
+      }),
     );
     addMessage("user", text);
     input.value = "";
@@ -216,9 +237,18 @@ const run = (
 
     socket.addEventListener("open", () => {
       // Greet the server with the persistent ids; `fresh` is true only on the first open of this page load, so a reconnect (network blip, server restart) reuses the same instance id without enqueuing a new `connect` event.
+      // `tz` is sent on hello too so the `connect` event (a new tab, no message yet) still carries the user's local timezone.
       const fresh = !greeted;
       greeted = true;
-      socket.send(JSON.stringify({ type: "hello", clientId, instanceId, fresh }));
+      socket.send(
+        JSON.stringify({
+          type: "hello",
+          clientId,
+          instanceId,
+          fresh,
+          tz: localTzLabel(),
+        }),
+      );
       backoff = 1000;
       setConnected(true);
       input.focus();

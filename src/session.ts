@@ -169,8 +169,19 @@ function buildFirstUserMessage(
   event: Event,
   channels: readonly ResponseChannel[],
 ): string {
+  // The user's current local timezone, if the event's source carries one (e.g. the webui client computes it in the browser and sends it with each message, so the agent can interpret local times the user mentions).
+  // This is a generic read off `event.payload` rather than webui-specific: any source that carries a `tz` string gets it surfaced, and a source that omits it degrades to the plain UTC line unchanged.
+  const tz =
+    typeof event.payload === "object" && event.payload !== null
+      ? (event.payload as { tz?: unknown }).tz
+      : undefined;
+  const now = new Date().toISOString();
+  const timeLine =
+    typeof tz === "string" && tz !== ""
+      ? `Current time: ${now} (user local timezone: ${tz})`
+      : `Current time: ${now}`;
   const lines = [
-    `Current time: ${new Date().toISOString()}`,
+    timeLine,
     "",
     `Event source: ${event.source}`,
     "Event payload:",
