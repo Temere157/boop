@@ -86,6 +86,7 @@ The registry is simply the set of reply paths open right now; it has no knowledg
 
 Channel lifetimes are deliberately independent of events.
 An HTTP ingest channel is transient — it lives only while one request is held open — but an SMS channel could be eternal (registered at startup, never unregistered) and a webui channel is transient on its own clock (the life of a connection).
+A webui client that sits idle closes its own connection on a client-tracked clock (20 minutes while the tab is visible, 10 while hidden), so an idle tab's reply path closes promptly instead of lingering as a dead one.
 A single event may carry a channel id in its payload so the session handling it knows where to reply, but the registry does not tie a channel's lifetime to any event.
 
 The plugin boundary for replies sits on the channels, not the tool.

@@ -3,6 +3,7 @@
 // The backend (`plugins/webui/index.ts`) enqueues a `webui` event per new tab (a `connect`) and per submitted message, and registers a response channel so the agent's `respond` tool writes back through the same socket — those replies arrive here as `reply` frames in the `onmessage` envelope.
 // The same socket also carries `status` frames: global busy/idle transitions from the core, so this tab shows a working indicator whenever any event is being handled — not just the ones it triggered.
 // A reconnect (network blip, server restart) reuses the same per-tab instance id with `fresh:false` so it does not enqueue a fresh `connect`; only a new tab — a new instance id — does (see the hello frame sent in `connect`).
+// An idle tab closes its own connection on a client-tracked clock (20 minutes visible, 10 hidden) and shows a yellow dot; focusing the input, typing into it, or the tab becoming visible reconnects it with the same instance id (a `fresh:false` hello).
 //
 // Stays within erasable syntax (no enums, namespaces, or parameter properties) so the server's type-stripping pipeline serves it unchanged.
 
@@ -20,6 +21,9 @@ const CLIENT_ID_KEY = "boop.client-id";
 const INSTANCE_ID_KEY = "boop.instance-id";
 /** `sessionStorage` key for the rendered message history (cleared when the tab closes, so a fresh tab starts empty, but a reload replays the conversation in place). */
 const MESSAGES_KEY = "boop.messages";
+/** Idle timeouts for the tab's own connection, tracked client-side: a visible tab (the user is watching) sits idle 20 minutes before its socket closes, a hidden one 10. */
+const IDLE_TIMEOUT_VISIBLE_MS = 20 * 60_000;
+const IDLE_TIMEOUT_HIDDEN_MS = 10 * 60_000;
 
 /** A v4 UUID; `crypto.randomUUID` in secure contexts (HTTPS, localhost), with a `Math.random` fallback for insecure ones (plain HTTP on a LAN IP) so the ids still exist where `randomUUID` is unavailable. */
 function uuid(): string {
@@ -171,7 +175,8 @@ const run = (
   }
 
   // Connection and working state for the merged `#status` dot, so the title composes both signals and the working phase transitions survive a disconnect that recolors the dot mid-work.
-  let isConnected = false;
+  // `connection` is `connected` (green: the socket is open), `idle` (yellow: the idle timeout closed the socket, activity reconnects), or `disconnected` (red: the socket dropped, backoff reconnect in progress).
+  let connection: "connected" | "idle" | "disconnected" = "disconnected";
   let isBusy = false;
   let busySource: string | null = null;
   // A pending `transitionend` remover for `.active` (set when the merge starts, cleared on interrupt or completion), so a re-spread mid-merge does not strand a spin-stopping callback.
@@ -183,19 +188,23 @@ const run = (
       ? busySource === null
         ? "working"
         : `working: ${busySource}`
-      : isConnected
+      : connection === "connected"
         ? "connected"
-        : "disconnected";
+        : connection === "idle"
+          ? "idle (reconnects on activity)"
+          : "disconnected";
   }
 
-  function setConnected(connected: boolean): void {
-    isConnected = connected;
-    // Toggle the connection class rather than overwriting `className`, so the working phase classes (`.active`/`.spread`) survive a recolor mid-work.
-    status.classList.toggle("connected", connected);
-    status.classList.toggle("disconnected", !connected);
+  /** Sets the connection state and reflects it into the dot (its color classes and `title`), the send button (only a connected socket can submit), and the bell (a closed socket cannot report push subscriptions). */
+  function setConnection(next: "connected" | "idle" | "disconnected"): void {
+    connection = next;
+    // Toggle the connection classes rather than overwriting `className`, so the working phase classes (`.active`/`.spread`) survive a recolor mid-work.
+    status.classList.toggle("connected", next === "connected");
+    status.classList.toggle("idle", next === "idle");
+    status.classList.toggle("disconnected", next === "disconnected");
     updateTitle();
-    input.disabled = !connected;
-    sendButton.disabled = !connected;
+    // The input stays usable in every state (typing or focusing it is what marks the tab active and wakes a timed-out connection), so only the send button gates on the connection.
+    sendButton.disabled = next !== "connected";
     updateNotifyButton();
   }
 
@@ -209,7 +218,7 @@ const run = (
    */
   function updateNotifyButton(): void {
     if (notifyButton === null) return;
-    if (!notificationsAvailable() || !isConnected) {
+    if (!notificationsAvailable() || connection !== "connected") {
       notifyButton.disabled = true;
       notifyButton.classList.remove("on");
       notifyButton.setAttribute("aria-pressed", "false");
@@ -361,6 +370,19 @@ const run = (
     input.value = "";
   });
 
+  // Activity that (re)marks the tab active: focusing the input or typing into it resets the idle clock and wakes a timed-out connection (the input stays enabled in every state, so focus is what a timed-out tab listens for).
+  input.addEventListener("focus", markActive);
+  input.addEventListener("input", markActive);
+
+  // A hidden tab is worth 10 minutes of idleness before its connection closes; the moment it becomes visible again the user is present, so a timed-out tab reconnects immediately.
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") {
+      markActive();
+    } else if (connection === "connected") {
+      armIdleTimer();
+    }
+  });
+
   // Persistent parent id (one per browser, in `localStorage`) and per-tab instance id (in `sessionStorage`, so it survives reloads but changes when the tab is closed and a new one opens).
   // The server enqueues a `connect` only for a new tab (a new instance id, signalled by `fresh:true` on the first open of this page load); a reconnect reuses the same ids with `fresh:false` so a blip or server restart does not look like a new client.
   const clientId = persistentId(localStorage, CLIENT_ID_KEY);
@@ -372,6 +394,46 @@ const run = (
   let ws: WebSocket | null = null;
   let backoff = 1000;
   let timer: ReturnType<typeof setTimeout> | null = null;
+
+  // The idle clock for this tab's own connection, tracked client-side: armed on connect, disarmed on close, and the timeout is visibility-dependent (a visible tab is worth 20 minutes, a hidden one 10).
+  let idleTimer: ReturnType<typeof setTimeout> | null = null;
+
+  /** The idle timeout for the tab's current visibility. */
+  function idleTimeoutMs(): number {
+    return document.visibilityState === "visible"
+      ? IDLE_TIMEOUT_VISIBLE_MS
+      : IDLE_TIMEOUT_HIDDEN_MS;
+  }
+
+  /** Clears the idle clock. */
+  function disarmIdleTimer(): void {
+    if (idleTimer !== null) clearTimeout(idleTimer);
+    idleTimer = null;
+  }
+
+  /** Arms the idle clock: after the visibility-dependent timeout the socket is closed on purpose and the dot turns yellow. */
+  function armIdleTimer(): void {
+    disarmIdleTimer();
+    idleTimer = setTimeout(onIdleTimeout, idleTimeoutMs());
+  }
+
+  /** The tab has been idle long enough: close the socket on purpose (the server drops the reply channel with the connection) and show the idle state without scheduling a reconnect. */
+  function onIdleTimeout(): void {
+    idleTimer = null;
+    if (ws === null || ws.readyState !== WebSocket.OPEN) return;
+    setConnection("idle");
+    ws.close();
+  }
+
+  /** The user is present again (focused the input, typed, or the tab became visible): wake an idle connection, or reset the idle clock on a connected one. */
+  function markActive(): void {
+    if (connection === "idle") {
+      // `ws` is cleared on close, so a second wake before the socket opens is a no-op.
+      if (ws === null) connect();
+      return;
+    }
+    if (connection === "connected") armIdleTimer();
+  }
 
   function connect(): void {
     const url =
@@ -397,7 +459,8 @@ const run = (
         }),
       );
       backoff = 1000;
-      setConnected(true);
+      setConnection("connected");
+      armIdleTimer();
       input.focus();
       // Re-report any existing push subscription so the `push:<clientId>` channel survives a reconnect or reload.
       void reportExistingSubscription();
@@ -429,14 +492,19 @@ const run = (
     });
 
     const scheduleReconnect = (): void => {
-      setConnected(false);
-      ws = null;
+      setConnection("disconnected");
       if (timer !== null) clearTimeout(timer);
       timer = setTimeout(connect, backoff);
       backoff = Math.min(backoff * 2, 10_000);
     };
 
-    socket.addEventListener("close", scheduleReconnect);
+    socket.addEventListener("close", () => {
+      disarmIdleTimer();
+      ws = null;
+      // An intentional idle-close has no reconnect: the tab is idle, so we sit closed (yellow) until activity wakes us.
+      if (connection === "idle") return;
+      scheduleReconnect();
+    });
     socket.addEventListener("error", () => {
       // `close` always fires after `error`; reconnect is scheduled there.
       socket.close();
@@ -448,7 +516,7 @@ const run = (
   for (const { role, text } of history) addMessage(role, text);
   recording = true;
 
-  setConnected(false);
+  setConnection("disconnected");
   connect();
 
   // Register the app-shell service worker so the webui opens offline and is installable as a homescreen app.

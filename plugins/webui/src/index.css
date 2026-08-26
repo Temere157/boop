@@ -129,6 +129,11 @@ body {
   color: #16a34a;
 }
 
+#status.idle {
+  /* Yellow while the idle timeout has closed the connection (activity reconnects). */
+  color: #facc15;
+}
+
 #status.disconnected {
   color: #dc2626;
 }

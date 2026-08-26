@@ -23,7 +23,8 @@
         <!-- The boop logo, scaled to fit the header next to the title. -->
         <img id="logo" src="./icon-512-maskable.png" alt="" />
         <h1>boop</h1>
-        <!-- The connection dot, which doubles as the working indicator: a single dot at rest that splits into three orbiting dots while the agent is working (spiral out → spin → spiral back in). Color encodes the WebSocket connection state (green connected, red disconnected). -->
+<!-- The connection dot, which doubles as the working indicator: a single dot at rest that splits into three orbiting dots while the agent is working (spiral out → spin → spiral back in).
+        Color encodes the connection state: green connected, yellow idle (the idle timeout closed the connection, activity reconnects), red disconnected. -->
         <span id="status" class="disconnected" title="disconnected">
           <span class="dot"></span>
           <span class="dot"></span>
@@ -53,7 +54,6 @@
             type="text"
             name="message"
             placeholder="say something"
-            disabled
           />
           <button id="composer-send" type="submit" disabled>send</button>
         </form>
