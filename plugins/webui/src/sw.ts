@@ -14,6 +14,23 @@ interface SwFetchEvent {
   respondWith(promise: Promise<Response> | Response): void;
 }
 
+/** The `push` event shape: the (nil-able) payload plus a `waitUntil` to keep the worker alive while the notification is shown. */
+interface SwPushEvent {
+  readonly data: { text(): string } | null;
+  waitUntil(promise: Promise<unknown>): void;
+}
+
+/** The `notificationclick` event shape: the notification to close plus a `waitUntil` for the focus/open handler. */
+interface SwNotificationClickEvent {
+  readonly notification: { close(): void };
+  waitUntil(promise: Promise<unknown>): void;
+}
+
+/** A client window the notification click can bring to the front. */
+interface SwClient {
+  focus?(): Promise<unknown>;
+}
+
 /** The subset of the service worker global scope the shell uses. */
 interface SwScope {
   addEventListener(
@@ -21,8 +38,23 @@ interface SwScope {
     listener: (event: SwLifecycleEvent) => void,
   ): void;
   addEventListener(type: "fetch", listener: (event: SwFetchEvent) => void): void;
+  addEventListener(type: "push", listener: (event: SwPushEvent) => void): void;
+  addEventListener(
+    type: "notificationclick",
+    listener: (event: SwNotificationClickEvent) => void,
+  ): void;
   skipWaiting(): void;
-  clients: { claim(): void };
+  clients: {
+    claim(): void;
+    matchAll(options?: { type: string }): Promise<SwClient[]>;
+    openWindow?(url: string): Promise<unknown>;
+  };
+  readonly registration: {
+    showNotification(
+      title: string,
+      options?: { body?: string; icon?: string },
+    ): Promise<void>;
+  };
   readonly location: Location;
 }
 
@@ -78,6 +110,37 @@ sw.addEventListener("fetch", (event) => {
   if (mode === "navigate" || url.pathname.startsWith("/ui/")) {
     event.respondWith(networkFirst(req));
   }
+});
+
+// Web push: a `push` event is the push service waking this worker after the server POSTs a payload to the subscription endpoint.
+// The payload is the agent message; surface it as a system notification. This is what lets boop reach the user even when no tab is open.
+sw.addEventListener("push", (event) => {
+  const body = event.data !== null ? event.data.text() : "boop";
+  event.waitUntil(
+    sw.registration.showNotification("boop", {
+      body,
+      icon: "./icon-192.png",
+    }),
+  );
+});
+
+// Clicking the notification brings the webui to the front: focus the first open window, or open a new one if none is.
+sw.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  event.waitUntil(
+    (async () => {
+      const windows = await sw.clients.matchAll({ type: "window" });
+      for (const client of windows) {
+        if (typeof client.focus === "function") {
+          await client.focus();
+          return;
+        }
+      }
+      if (typeof sw.clients.openWindow === "function") {
+        await sw.clients.openWindow("/ui/");
+      }
+    })(),
+  );
 });
 
 /** Try the network, cache the fresh response, and fall back to the cache when offline. */

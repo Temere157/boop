@@ -1,8 +1,10 @@
 import { randomUUID } from "node:crypto";
-import { readFile, readdir } from "node:fs/promises";
+import { open, readFile, readdir, writeFile } from "node:fs/promises";
 import { stripTypeScriptTypes } from "node:module";
 import { extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import webpush from "web-push";
+import type { PushSubscription } from "web-push";
 import { WebSocket, WebSocketServer, type RawData } from "ws";
 import type {
   HttpResponse,
@@ -16,6 +18,32 @@ const SRC_DIR = fileURLToPath(new URL("./src/", import.meta.url));
 
 /** Heartbeat interval: how often to ping each connection to probe liveness. */
 const HEARTBEAT_MS = 15_000;
+
+/** The push service's contact address for this VAPID identity, per the VAPID spec (a `mailto:` or `https:` URI), used when the user has not set `vapidSubject` in the plugin's config. */
+const DEFAULT_VAPID_SUBJECT = "mailto:boop@localhost";
+
+/** The config file the webui plugin reads its own options from (a sibling of the plugin state dir). */
+const CONFIG_FILE = "config.json";
+
+/** Hard cap on a push payload, since push services reject bodies over ~4KB; a longer reply is truncated so the notification still delivers. */
+const PUSH_PAYLOAD_MAX = 4000;
+
+/**
+ * Loads the plugin's `vapidSubject` from its own config file (`{configDir}/config.json`), falling back to {@link DEFAULT_VAPID_SUBJECT} when the file is missing, malformed, or omits the key.
+ * A missing file is the default, not an error, so the plugin works with no user config; the config file is read by this plugin, written by the user.
+ */
+async function loadVapidSubject(configDir: string): Promise<string> {
+  try {
+    const raw = await readFile(join(configDir, CONFIG_FILE), "utf8");
+    const parsed = JSON.parse(raw) as { vapidSubject?: unknown };
+    if (parsed !== null && typeof parsed.vapidSubject === "string" && parsed.vapidSubject.length > 0) {
+      return parsed.vapidSubject;
+    }
+  } catch {
+    // Missing or malformed config file: fall back to the default.
+  }
+  return DEFAULT_VAPID_SUBJECT;
+}
 
 /** Content-Type for text extensions served verbatim; unknown text extensions fall back to the caller. */
 const TEXT_CONTENT_TYPE: Record<string, string> = {
@@ -115,6 +143,140 @@ class WebuiChannel implements ResponseChannel {
   }
 }
 
+/**
+ * Manages the push-subscription file: a JSON array of `{ clientId, subscription }` entries, one per browser.
+ * Loaded at startup (each entry registering a {@link PushChannel}), mutated live as clients subscribe/unsubscribe, and rewritten on every mutation so a crash loses at most the in-flight change.
+ * The store keys on `clientId` — the per-browser id the client persists in `localStorage` — so a browser that reconnects reuses its stored subscription rather than duplicating.
+ */
+class PushSubscriptionStore {
+  private readonly subs = new Map<string, PushSubscription>();
+  private readonly path: string;
+
+  constructor(path: string) {
+    this.path = path;
+  }
+
+  /** Loads the file; a missing or malformed file is treated as empty so a corrupt state never blocks startup. */
+  async load(): Promise<void> {
+    try {
+      const raw = await readFile(this.path, "utf8");
+      const parsed = JSON.parse(raw) as { subscriptions?: unknown };
+      if (parsed !== null && Array.isArray(parsed.subscriptions)) {
+        for (const entry of parsed.subscriptions) {
+          if (typeof entry !== "object" || entry === null) continue;
+          const e = entry as { clientId?: unknown; subscription?: unknown };
+          if (typeof e.clientId !== "string" || e.clientId === "") continue;
+          const sub = sanitizePushSubscription(e.subscription);
+          if (sub === undefined) continue;
+          this.subs.set(e.clientId, sub);
+        }
+      }
+    } catch {
+      // Missing or malformed file: start empty.
+    }
+  }
+
+  /** Snapshot of `(clientId, subscription)` pairs, for startup registration. */
+  entries(): readonly { clientId: string; subscription: PushSubscription }[] {
+    return [...this.subs.entries()].map(([clientId, subscription]) => ({
+      clientId,
+      subscription,
+    }));
+  }
+
+  /** Number of stored subscriptions, for the startup log line. */
+  get size(): number {
+    return this.subs.size;
+  }
+
+  /** Insert or replace the subscription for `clientId`, persisting immediately. */
+  upsert(clientId: string, subscription: PushSubscription): void {
+    this.subs.set(clientId, subscription);
+    void this.save();
+  }
+
+  /** Remove the subscription for `clientId` (idempotent), persisting immediately. */
+  remove(clientId: string): void {
+    this.subs.delete(clientId);
+    void this.save();
+  }
+
+  /** Rewrites the state file from the current map. */
+  private async save(): Promise<void> {
+    const file = {
+      subscriptions: [...this.subs.entries()].map(([clientId, subscription]) => ({
+        clientId,
+        subscription,
+      })),
+    };
+    await writeFile(this.path, JSON.stringify(file, null, 2), "utf8");
+  }
+}
+
+/**
+ * Validates a client-supplied push subscription: an object with a string `endpoint` and `keys.p256dh`/`keys.auth` strings.
+ * Returns the subscription or `undefined` when it is malformed, so a bad frame never reaches the push library.
+ */
+function sanitizePushSubscription(raw: unknown): PushSubscription | undefined {
+  if (typeof raw !== "object" || raw === null) return undefined;
+  const r = raw as { endpoint?: unknown; keys?: unknown };
+  if (typeof r.endpoint !== "string" || r.endpoint === "") return undefined;
+  if (typeof r.keys !== "object" || r.keys === null) return undefined;
+  const k = r.keys as { p256dh?: unknown; auth?: unknown };
+  if (typeof k.p256dh !== "string" || typeof k.auth !== "string") return undefined;
+  return { endpoint: r.endpoint, keys: { p256dh: k.p256dh, auth: k.auth } };
+}
+
+/**
+ * Reads a `statusCode` off a rejected `sendNotification` error (a `WebPushError` carries one), or returns 0 when the error has no code.
+ * Used to detect the push service's "gone" responses (404/410) so a dead subscription is pruned rather than retried forever.
+ */
+function pushStatusCode(err: unknown): number {
+  if (typeof err === "object" && err !== null && "statusCode" in err) {
+    const code = (err as { statusCode?: unknown }).statusCode;
+    return typeof code === "number" ? code : 0;
+  }
+  return 0;
+}
+
+/**
+ * A live response channel that delivers a message as a browser system notification via web push.
+ * Unlike {@link WebuiChannel} (which writes through a live WebSocket), a push channel delivers even with no tab open: the push service wakes the browser's service worker, which calls `showNotification`.
+ * It is registered for the life of a stored subscription (effectively eternal for the process once subscribed), and unregistered when the client unsubscribes or the push service reports the subscription gone (404/410).
+ * `send` encrypts the payload with the subscription's keys and POSTs it to the push endpoint via `web-push`; a non-200 response rejects (surfacing to the `respond` tool as `isError`) and a 404/410 prunes the dead subscription before rejecting.
+ */
+class PushChannel implements ResponseChannel {
+  readonly id: string;
+  readonly description: string;
+  private readonly subscription: PushSubscription;
+  private readonly onDead: () => void;
+
+  constructor(id: string, subscription: PushSubscription, onDead: () => void) {
+    this.id = id;
+    this.subscription = subscription;
+    this.onDead = onDead;
+    this.description =
+      "An interruptive system notification to the user's browser via web push, delivered even with no tab open while the browser is online. " +
+      "Use only when the user must be interrupted right now — a high-priority, time-sensitive event that cannot wait. " +
+      "Do not send routine or informational messages here. " +
+      "For anything lower priority, do not push it: remember it in memory and relay it via a webui channel once the user is online, instead of interrupting.";
+  }
+
+  async send(message: string): Promise<void> {
+    const payload =
+      message.length > PUSH_PAYLOAD_MAX
+        ? message.slice(0, PUSH_PAYLOAD_MAX - 1) + "\u2026"
+        : message;
+    try {
+      await webpush.sendNotification(this.subscription, payload);
+    } catch (err) {
+      const code = pushStatusCode(err);
+      if (code === 404 || code === 410) this.onDead();
+      throw err;
+    }
+  }
+}
+
 /** A prior turn in a tab's conversation, normalized to model-conventional roles for the session. */
 type HistoryTurn = { readonly role: "user" | "assistant"; readonly text: string };
 
@@ -208,12 +370,15 @@ function sanitizeTz(raw: unknown): string | undefined {
  * Each connection owns one {@link WebuiChannel} keyed by the client's per-tab instance id, registered for the life of the connection; a heartbeat (ping/pong) unregisters the channel promptly when a client vanishes without a clean close, and a reconnect re-registers under the same id so the agent's reply path survives a blip.
  * The plugin also subscribes to the core's global busy/idle status bus and broadcasts every transition to all connected clients as a `status` frame, so each tab shows a working indicator whenever any event is being handled — not just the ones it triggered.
  *
- * The plugin depends only on the {@link Plugin} contract (plus the `ws` server library), not on any core implementation, so it could be moved to an external package as-is.
+ * It additionally provides web push: a VAPID key pair generated (and persisted) on first launch, an HTTP route exposing the public key, and a persistent `push:<clientId>` {@link PushChannel} per subscribed browser (stored in the state dir and re-registered at startup), so the agent can reach the user with a browser system notification even when no tab is open.
  *
+ * The plugin depends only on the {@link Plugin} contract (plus the `ws` server library and `web-push`), not on any core implementation, so it could be moved to an external package as-is.
+ *
+ *   GET  /push-key    ->  the application's VAPID public key, so the browser can subscribe to web push
  *   GET  /ui/<file>   ->  serves a file from src/ (`.ts` type-stripped)
  *   GET  /ui/         ->  serves index.html (the SPA entry)
  *   GET  /            ->  302 to /ui/
- *   WS   /ws          ->  per-connection event provider + response channel
+ *   WS   /ws          ->  per-connection event provider + response channel (and push-subscription control frames)
  *
  * Events enqueued, each carrying `responseChannel` (the reply path, keyed by the per-tab instance id), `clientId` (the persistent parent — one per browser, shared across tabs), and `instanceId` (the per-tab sub-id, new per tab):
  *   { source: "webui", payload: { type: "connect", responseChannel, clientId, instanceId, tz? } }   — only on a new tab (a fresh, unseen instance id), not on a reconnect
@@ -222,6 +387,12 @@ function sanitizeTz(raw: unknown): string | undefined {
  * Frames sent to every connected client, so each tab reflects the agent's global state rather than only its own conversation:
  *   { type: "reply", text }                 — an agent reply (via the `respond` tool)
  *   { type: "status", status, source }       — a busy/idle transition from the core status bus (source is the event source on `busy`, `null` on `idle`)
+ *
+ * Frames received from a client after its hello, in addition to the `{ type: "message", … }` submission:
+ *   { type: "notify_subscribe", subscription }     — register the browser's web-push subscription under its `clientId`, opening a `push:<clientId>` response channel
+ *   { type: "notify_unsubscribe" }                 — drop the stored subscription and close the `push:<clientId>` channel
+ *
+ * In addition to the per-tab {@link WebuiChannel} (chat bubbles over the socket), the plugin registers a persistent `push:<clientId>` {@link PushChannel} per subscribed browser, delivering agent replies as browser system notifications even with no tab open.
  */
 export const webuiPlugin: Plugin = {
   name: "webui",
@@ -279,6 +450,50 @@ export const webuiPlugin: Plugin = {
       currentStatus = { status, source };
       broadcast({ type: "status", status, source });
     });
+
+    // Web push setup: generate (once) and persist the VAPID key pair, then register an HTTP route that hands the public key to the browser so it can subscribe.
+    // A missing or malformed key file means a fresh pair is generated and written, so the identity is stable across restarts; the private key never leaves the state dir.
+    // The VAPID subject (a `mailto:` or `https:` contact) is the user's to set, read from the plugin's own config file with a default fallback.
+    const vapidPath = join(host.paths.stateDir, "vapid.json");
+    const vapidSubject = await loadVapidSubject(host.paths.configDir);
+    let vapid: { publicKey: string; privateKey: string };
+    try {
+      const raw = await readFile(vapidPath, "utf8");
+      const parsed = JSON.parse(raw) as { publicKey?: unknown; privateKey?: unknown };
+      if (typeof parsed.publicKey === "string" && typeof parsed.privateKey === "string") {
+        vapid = { publicKey: parsed.publicKey, privateKey: parsed.privateKey };
+      } else {
+        vapid = webpush.generateVAPIDKeys();
+        await writeFile(vapidPath, JSON.stringify(vapid, null, 2), "utf8");
+      }
+    } catch {
+      vapid = webpush.generateVAPIDKeys();
+      await writeFile(vapidPath, JSON.stringify(vapid, null, 2), "utf8");
+    }
+    webpush.setVapidDetails(vapidSubject, vapid.publicKey, vapid.privateKey);
+    host.http.route("GET", "/push-key", () => ({
+      status: 200,
+      headers: { "content-type": "application/json; charset=utf-8" },
+      body: JSON.stringify({ publicKey: vapid.publicKey }),
+    }));
+    log.info("web push ready", { publicKey: vapid.publicKey.slice(0, 8) + "…" });
+
+    // Persisted push subscriptions, loaded at startup so a channel is registered for every known browser immediately — push delivers out-of-band, independent of any open tab or WebSocket.
+    // Registering here (before any client connects) means the agent sees the channel in its very first session message and can reach the user without them having the webui open.
+    const pushStore = new PushSubscriptionStore(
+      join(host.paths.stateDir, "push-subscriptions.json"),
+    );
+    await pushStore.load();
+    for (const { clientId, subscription } of pushStore.entries()) {
+      const id = `push:${clientId}`;
+      host.responses.register(
+        new PushChannel(id, subscription, () => {
+          pushStore.remove(clientId);
+          host.responses.unregister(id);
+        }),
+      );
+    }
+    log.info("push subscriptions loaded", { count: pushStore.size });
 
     function onConnection(ws: WebSocket): void {
       // Unknown until the hello frame arrives: the channel is not registered and no event is enqueued until we know which client instance this socket belongs to.
@@ -350,6 +565,47 @@ export const webuiPlugin: Plugin = {
           } else {
             log.debug("reconnect", { id: instanceId, clientId, fresh });
           }
+          return;
+        }
+
+        // A submitted message or a push-subscription control frame: the client sends a JSON frame; `notify_subscribe`/`notify_unsubscribe` toggle the browser's push channel, anything else is a `{ type: "message", text, history, tz }` frame parsed below (falling back to plain text for an old or odd client).
+        let frame: unknown;
+        try {
+          frame = JSON.parse(text);
+        } catch {
+          frame = undefined;
+        }
+        const frameType =
+          typeof frame === "object" && frame !== null
+            ? (frame as { type?: unknown }).type
+            : undefined;
+
+        if (frameType === "notify_subscribe") {
+          // The user granted notification permission and the browser produced a subscription: store it under this browser's `clientId` and (re)register the `push:<clientId>` channel.
+          // `unregister` first so a reconnect (which already has the channel from the store) does not trip the registry's duplicate-id rejection; `clientId` is set from the hello frame before this branch is reachable.
+          const subscription = sanitizePushSubscription(
+            (frame as { subscription?: unknown }).subscription,
+          );
+          if (subscription !== undefined) {
+            pushStore.upsert(clientId, subscription);
+            const id = `push:${clientId}`;
+            host.responses.unregister(id);
+            host.responses.register(
+              new PushChannel(id, subscription, () => {
+                pushStore.remove(clientId);
+                host.responses.unregister(id);
+              }),
+            );
+            log.debug("push subscribed", { clientId });
+          }
+          return;
+        }
+
+        if (frameType === "notify_unsubscribe") {
+          // The user disabled notifications: drop the stored subscription and the channel.
+          pushStore.remove(clientId);
+          host.responses.unregister(`push:${clientId}`);
+          log.debug("push unsubscribed", { clientId });
           return;
         }
 

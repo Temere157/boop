@@ -12,6 +12,7 @@ const status = document.getElementById("status") as HTMLSpanElement | null;
 const form = document.getElementById("composer") as HTMLFormElement | null;
 const input = document.getElementById("composer-input") as HTMLInputElement | null;
 const sendButton = document.getElementById("composer-send") as HTMLButtonElement | null;
+const notifyButton = document.getElementById("notify") as HTMLButtonElement | null;
 
 /** `localStorage` key for the persistent parent id (one per browser, shared across tabs). */
 const CLIENT_ID_KEY = "boop.client-id";
@@ -85,6 +86,39 @@ function persistentId(storage: Storage, key: string): string {
   return id;
 }
 
+/** Is web push (notifications) usable here at all? Requires the Notification API, a service worker, and the PushManager API. */
+function notificationsAvailable(): boolean {
+  return (
+    "Notification" in window &&
+    "serviceWorker" in navigator &&
+    "PushManager" in window
+  );
+}
+
+/**
+ * Decodes a base64url string (the VAPID public key, as the server generates it) to a `Uint8Array`.
+ * `pushManager.subscribe` wants the application server key as a `BufferSource`, which requires the raw bytes rather than the string.
+ */
+function base64UrlToUint8Array(base64Url: string): Uint8Array<ArrayBuffer> {
+  const base64 = base64Url.replace(/-/g, "+").replace(/_/g, "/");
+  const padded = base64.padEnd(base64.length + ((4 - (base64.length % 4)) % 4), "=");
+  const binary = atob(padded);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes;
+}
+
+/** Fetches the application's VAPID public key from `/push-key`, so the browser can subscribe to web push. */
+async function fetchPushKey(): Promise<string> {
+  const res = await fetch("/push-key");
+  if (!res.ok) throw new Error(`push-key request failed: ${res.status}`);
+  const body = (await res.json()) as { publicKey?: unknown };
+  if (typeof body.publicKey !== "string" || body.publicKey === "") {
+    throw new Error("push-key response malformed");
+  }
+  return body.publicKey;
+}
+
 const run = (
   _app: HTMLElement,
   stream: HTMLOListElement,
@@ -92,6 +126,7 @@ const run = (
   form: HTMLFormElement,
   input: HTMLInputElement,
   sendButton: HTMLButtonElement,
+  notifyButton: HTMLButtonElement | null,
 ): void => {
   /** Is the stream scrolled to (near) the bottom? Drives auto-stick. */
   function atBottom(): boolean {
@@ -161,7 +196,119 @@ const run = (
     updateTitle();
     input.disabled = !connected;
     sendButton.disabled = !connected;
+    updateNotifyButton();
   }
+
+  // Whether this browser has a push subscription reported to the server (the `push:<clientId>` channel).
+  // Drives the bell's on/off state and what a click does; tracked in memory only, since it is derived from live permission plus the reported subscription, and re-evaluated on each load.
+  let pushEnabled = false;
+
+  /**
+   * Reflects the current notification ability and state into the bell button.
+   * Disabled (and dimmed) when unsupported or disconnected; `on`/filled when a subscription is reported; otherwise an outline bell.
+   */
+  function updateNotifyButton(): void {
+    if (notifyButton === null) return;
+    if (!notificationsAvailable() || !isConnected) {
+      notifyButton.disabled = true;
+      notifyButton.classList.remove("on");
+      notifyButton.setAttribute("aria-pressed", "false");
+      notifyButton.title = notificationsAvailable()
+        ? "notifications (offline)"
+        : "notifications not supported";
+      return;
+    }
+    notifyButton.disabled = false;
+    const on = Notification.permission === "granted" && pushEnabled;
+    notifyButton.classList.toggle("on", on);
+    notifyButton.setAttribute("aria-pressed", on ? "true" : "false");
+    if (on) {
+      notifyButton.title = "notifications on";
+    } else if (Notification.permission === "denied") {
+      notifyButton.title = "notifications blocked";
+    } else {
+      notifyButton.title = "notifications off";
+    }
+  }
+
+  /**
+   * Enables web push for this browser: request permission (soliciting only if it has not been decided), fetch the VAPID public key, subscribe, and report the subscription to the server so it registers the `push:<clientId>` channel.
+   */
+  async function enableNotifications(): Promise<void> {
+    if (ws === null || ws.readyState !== WebSocket.OPEN) return;
+    if (Notification.permission === "denied") return;
+    if (Notification.permission === "default") {
+      const permission = await Notification.requestPermission();
+      if (permission !== "granted") {
+        updateNotifyButton();
+        return;
+      }
+    }
+    try {
+      const publicKey = await fetchPushKey();
+      const registration = await navigator.serviceWorker.ready;
+      const subscription = await registration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: base64UrlToUint8Array(publicKey),
+      });
+      if (ws === null || ws.readyState !== WebSocket.OPEN) return;
+      ws.send(
+        JSON.stringify({ type: "notify_subscribe", subscription: subscription.toJSON() }),
+      );
+      pushEnabled = true;
+    } catch {
+      // Subscribe failed (no service worker, push unsupported, transient network); leave the bell off.
+      pushEnabled = false;
+    }
+    updateNotifyButton();
+  }
+
+  /**
+   * Disables web push for this browser: unsubscribe the browser's push subscription and tell the server to drop the `push:<clientId>` channel.
+   */
+  async function disableNotifications(): Promise<void> {
+    if (ws === null || ws.readyState !== WebSocket.OPEN) return;
+    try {
+      const registration = await navigator.serviceWorker.ready;
+      const subscription = await registration.pushManager.getSubscription();
+      if (subscription !== null) await subscription.unsubscribe();
+    } catch {
+      // Unsubscribe hiccup: still tell the server so it stops targeting this browser.
+    }
+    if (ws !== null && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: "notify_unsubscribe" }));
+    }
+    pushEnabled = false;
+    updateNotifyButton();
+  }
+
+  /**
+   * On (re)connect, if permission is granted, re-report the browser's existing push subscription so the server's `push:<clientId>` channel survives a blip or reload.
+   * The server also presses the store at startup, so this is belt-and-braces vs strays a rotated/cleared subscription.
+   */
+  async function reportExistingSubscription(): Promise<void> {
+    if (!notificationsAvailable() || Notification.permission !== "granted") return;
+    try {
+      const registration = await navigator.serviceWorker.ready;
+      const subscription = await registration.pushManager.getSubscription();
+      if (subscription === null) {
+        pushEnabled = false;
+      } else if (ws !== null && ws.readyState === WebSocket.OPEN) {
+        ws.send(
+          JSON.stringify({ type: "notify_subscribe", subscription: subscription.toJSON() }),
+        );
+        pushEnabled = true;
+      }
+    } catch {
+      pushEnabled = false;
+    }
+    updateNotifyButton();
+  }
+
+  notifyButton?.addEventListener("click", () => {
+    if (pushEnabled) void disableNotifications();
+    else void enableNotifications();
+  });
 
   /**
    * Merge the working indicator into the connection dot: `.spread` transitions the dots' orbital radius out (a spiral, since `.active` is already spinning) and removing it spirals them back in; `.active` keeps the spin through the merge and is cleared once the radius settles at 0.
@@ -252,6 +399,8 @@ const run = (
       backoff = 1000;
       setConnected(true);
       input.focus();
+      // Re-report any existing push subscription so the `push:<clientId>` channel survives a reconnect or reload.
+      void reportExistingSubscription();
     });
 
     socket.addEventListener("message", (event) => {
@@ -319,5 +468,5 @@ if (
   input !== null &&
   sendButton !== null
 ) {
-  run(app, stream, status, form, input, sendButton);
+  run(app, stream, status, form, input, sendButton, notifyButton);
 }

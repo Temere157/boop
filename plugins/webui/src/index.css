@@ -214,3 +214,33 @@ body {
   opacity: 0.45;
   cursor: not-allowed;
 }
+
+/* The notification toggle in the header, pushed to the far right opposite the status dot.
+   A thin outline bell at rest, filled with the accent colour when notifications are enabled, dimmed and inert while disconnected or unsupported. */
+#notify {
+  margin-left: auto;
+  align-self: center;
+  background: transparent;
+  border: none;
+  color: color-mix(in srgb, CanvasText 70%, Canvas);
+  cursor: pointer;
+  padding: 0.25rem;
+  border-radius: 0.375rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#notify.on {
+  color: var(--bubble-user);
+}
+
+#notify:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+#notify:focus-visible {
+  outline: 2px solid var(--bubble-user);
+  outline-offset: 1px;
+}

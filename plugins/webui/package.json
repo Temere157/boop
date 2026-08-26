@@ -5,9 +5,11 @@
   "type": "module",
   "exports": "./index.ts",
   "dependencies": {
-    "ws": "^8.18.0"
+    "ws": "^8.18.0",
+    "web-push": "^3.6.7"
   },
   "devDependencies": {
-    "@types/ws": "^8.5.0"
+    "@types/ws": "^8.5.0",
+    "@types/web-push": "^3.6.4"
   }
 }
