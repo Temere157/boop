@@ -4,6 +4,7 @@
 // The same socket also carries `status` frames: global busy/idle transitions from the core, so this tab shows a working indicator whenever any event is being handled — not just the ones it triggered.
 // A reconnect (network blip, server restart) reuses the same per-tab instance id with `fresh:false` so it does not enqueue a fresh `connect`; only a new tab — a new instance id — does (see the hello frame sent in `connect`).
 // An idle tab closes its own connection on a client-tracked clock (20 minutes visible, 10 hidden) and shows a yellow dot; focusing the input, typing into it, or the tab becoming visible reconnects it with the same instance id (a `fresh:false` hello).
+// The tab's favicon mirrors the connection state too (the black-and-white logo given a pale wash of the header dot's color, so the state is visible outside the page).
 //
 // Stays within erasable syntax (no enums, namespaces, or parameter properties) so the server's type-stripping pipeline serves it unchanged.
 
@@ -14,6 +15,7 @@ const form = document.getElementById("composer") as HTMLFormElement | null;
 const input = document.getElementById("composer-input") as HTMLInputElement | null;
 const sendButton = document.getElementById("composer-send") as HTMLButtonElement | null;
 const notifyButton = document.getElementById("notify") as HTMLButtonElement | null;
+const favicon = document.getElementById("favicon") as HTMLLinkElement | null;
 
 /** `localStorage` key for the persistent parent id (one per browser, shared across tabs). */
 const CLIENT_ID_KEY = "boop.client-id";
@@ -131,6 +133,7 @@ const run = (
   input: HTMLInputElement,
   sendButton: HTMLButtonElement,
   notifyButton: HTMLButtonElement | null,
+  favicon: HTMLLinkElement,
 ): void => {
   /** Is the stream scrolled to (near) the bottom? Drives auto-stick. */
   function atBottom(): boolean {
@@ -182,6 +185,63 @@ const run = (
   // A pending `transitionend` remover for `.active` (set when the merge starts, cleared on interrupt or completion), so a re-spread mid-merge does not strand a spin-stopping callback.
   let stopRemover: ((e: TransitionEvent) => void) | null = null;
 
+  // The favicon mirrors the connection state the header dot shows (green connected, yellow idle, red disconnected): the black-and-white logo given a pale wash of the state color, so the state is visible outside the page too.
+  // The colors duplicate the values in `index.css` (`#status.connected`/`#status.idle`/`#status.disconnected`), so the wash matches the dot.
+  const STATUS_COLORS = {
+    connected: "#16a34a",
+    idle: "#facc15",
+    disconnected: "#dc2626",
+  };
+  // The favicon canvas: the logo with the state color washed over it.
+  const faviconCanvas = document.createElement("canvas");
+  faviconCanvas.width = 64;
+  faviconCanvas.height = 64;
+  const faviconCtx = faviconCanvas.getContext("2d") as CanvasRenderingContext2D;
+  // The logo the wash is applied to; the favicon is empty until it loads (then the wash is repainted onto the logo).
+  const faviconBase = new Image();
+  faviconBase.src = "./icon-192.png";
+  // The color last painted, so a repeat state is not redrawn.
+  let faviconColor: string | null = null;
+
+  /**
+   * Paints the logo (once loaded) with a pale wash of `color` onto the favicon canvas and sets the result on the `<link rel="icon">`.
+   * The wash is a per-pixel multiply toward `color`, so the black-and-white shading stays mostly the logo's own (black stays black, the white parts pick up a pale wash of the color, and the transparent parts stay transparent).
+   */
+  function paintFavicon(color: string): void {
+    faviconCtx.clearRect(0, 0, 64, 64);
+    if (faviconBase.complete && faviconBase.naturalWidth > 0) {
+      faviconCtx.drawImage(faviconBase, 0, 0, 64, 64);
+    }
+    const strength = 0.4;
+    const r = 1 - strength + (strength * parseInt(color.slice(1, 3), 16)) / 255;
+    const g = 1 - strength + (strength * parseInt(color.slice(3, 5), 16)) / 255;
+    const b = 1 - strength + (strength * parseInt(color.slice(5, 7), 16)) / 255;
+    const image = faviconCtx.getImageData(0, 0, 64, 64);
+    const data = image.data;
+    for (let i = 0; i < data.length; i += 4) {
+      const pr = data[i] ?? 0;
+      const pg = data[i + 1] ?? 0;
+      const pb = data[i + 2] ?? 0;
+      data[i] = pr * r;
+      data[i + 1] = pg * g;
+      data[i + 2] = pb * b;
+    }
+    faviconCtx.putImageData(image, 0, 0);
+    favicon.href = faviconCanvas.toDataURL("image/png");
+  }
+
+  /** Sets the favicon to `color` (a no-op when the same color is already shown), mirroring the header dot's connection color in the tab. */
+  function setFavicon(color: string): void {
+    if (faviconColor === color) return;
+    faviconColor = color;
+    paintFavicon(color);
+  }
+
+  faviconBase.onload = (): void => {
+    // The logo is in: repaint the current color so the favicon gains the logo behind the tint.
+    if (faviconColor !== null) paintFavicon(faviconColor);
+  };
+
   /** Compose the dot's `title` from the current connection and working state so both signals stay legible regardless of which one last changed. */
   function updateTitle(): void {
     status.title = isBusy
@@ -206,6 +266,8 @@ const run = (
     // The input stays usable in every state (typing or focusing it is what marks the tab active and wakes a timed-out connection), so only the send button gates on the connection.
     sendButton.disabled = next !== "connected";
     updateNotifyButton();
+    // Mirror the connection state in the tab's favicon (the browser's only state visible outside the page).
+    setFavicon(STATUS_COLORS[next]);
   }
 
   // Whether this browser has a push subscription reported to the server (the `push:<clientId>` channel).
@@ -534,7 +596,8 @@ if (
   status !== null &&
   form !== null &&
   input !== null &&
-  sendButton !== null
+  sendButton !== null &&
+  favicon !== null
 ) {
-  run(app, stream, status, form, input, sendButton, notifyButton);
+  run(app, stream, status, form, input, sendButton, notifyButton, favicon);
 }
