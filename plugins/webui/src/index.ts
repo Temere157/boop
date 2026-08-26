@@ -5,6 +5,7 @@
 // A reconnect (network blip, server restart) reuses the same per-tab instance id with `fresh:false` so it does not enqueue a fresh `connect`; only a new tab — a new instance id — does (see the hello frame sent in `connect`).
 // An idle tab closes its own connection on a client-tracked clock (20 minutes visible, 10 hidden) and shows a yellow dot; focusing the input, typing into it, or the tab becoming visible reconnects it with the same instance id (a `fresh:false` hello).
 // The tab's favicon mirrors the connection state too (the black-and-white logo given a pale wash of the header dot's color, so the state is visible outside the page).
+// A new message arriving while the tab is hidden paints a badge on the favicon (a red disc in the top-right corner); the badge clears the moment the tab becomes visible again.
 //
 // Stays within erasable syntax (no enums, namespaces, or parameter properties) so the server's type-stripping pipeline serves it unchanged.
 
@@ -192,6 +193,8 @@ const run = (
     idle: "#facc15",
     disconnected: "#dc2626",
   };
+  // The badge color, a solid disc in the favicon's top-right corner marking new messages received while the tab was hidden.
+  const BADGE_COLOR = "#dc2626";
   // The favicon canvas: the logo with the state color washed over it.
   const faviconCanvas = document.createElement("canvas");
   faviconCanvas.width = 64;
@@ -202,10 +205,15 @@ const run = (
   faviconBase.src = "./icon-192.png";
   // The color last painted, so a repeat state is not redrawn.
   let faviconColor: string | null = null;
+  // Whether the badge is painted (a no-op guard alongside `faviconColor`, so a repeat color with the badge changing still repaints).
+  let faviconBadge = false;
+  // New messages received while the tab was hidden (the badge count); reset to 0 the moment the tab becomes visible again.
+  let unread = 0;
 
   /**
    * Paints the logo (once loaded) with a pale wash of `color` onto the favicon canvas and sets the result on the `<link rel="icon">`.
    * The wash is a per-pixel multiply toward `color`, so the black-and-white shading stays mostly the logo's own (black stays black, the white parts pick up a pale wash of the color, and the transparent parts stay transparent).
+   * When `unread` is nonzero, a badge (a solid `BADGE_COLOR` disc in the top-right corner with a white ring) is drawn after the wash, so it stays full-saturation.
    */
   function paintFavicon(color: string): void {
     faviconCtx.clearRect(0, 0, 64, 64);
@@ -227,13 +235,23 @@ const run = (
       data[i + 2] = pb * b;
     }
     faviconCtx.putImageData(image, 0, 0);
+    if (unread > 0) {
+      faviconCtx.beginPath();
+      faviconCtx.arc(46, 10, 8, 0, Math.PI * 2);
+      faviconCtx.fillStyle = BADGE_COLOR;
+      faviconCtx.fill();
+      faviconCtx.lineWidth = 2;
+      faviconCtx.strokeStyle = "#ffffff";
+      faviconCtx.stroke();
+    }
     favicon.href = faviconCanvas.toDataURL("image/png");
   }
 
-  /** Sets the favicon to `color` (a no-op when the same color is already shown), mirroring the header dot's connection color in the tab. */
+  /** Sets the favicon to `color` (a no-op when the same color and badge state are already shown), mirroring the header dot's connection color in the tab. */
   function setFavicon(color: string): void {
-    if (faviconColor === color) return;
+    if (faviconColor === color && faviconBadge === (unread > 0)) return;
     faviconColor = color;
+    faviconBadge = unread > 0;
     paintFavicon(color);
   }
 
@@ -437,9 +455,14 @@ const run = (
   input.addEventListener("input", markActive);
 
   // A hidden tab is worth 10 minutes of idleness before its connection closes; the moment it becomes visible again the user is present, so a timed-out tab reconnects immediately.
+  // Becoming visible also clears the favicon's unread badge (the user can see the stream again, so the badge is stale).
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "visible") {
       markActive();
+      if (unread > 0) {
+        unread = 0;
+        setFavicon(faviconColor ?? STATUS_COLORS.disconnected);
+      }
     } else if (connection === "connected") {
       armIdleTimer();
     }
@@ -540,7 +563,14 @@ const run = (
       const f = frame as { type?: string };
       if (f.type === "reply") {
         const text = (frame as { text?: unknown }).text;
-        if (typeof text === "string" && text !== "") addMessage("agent", text);
+        if (typeof text === "string" && text !== "") {
+          addMessage("agent", text);
+          // A new message while the tab is hidden: count it so the favicon badge shows; a visible tab's user is already looking at the stream, so no badge.
+          if (document.visibilityState !== "visible") {
+            unread++;
+            setFavicon(faviconColor ?? STATUS_COLORS.disconnected);
+          }
+        }
       } else if (f.type === "status") {
         const status = (frame as { status?: unknown }).status;
         const source = (frame as { source?: unknown }).source;
